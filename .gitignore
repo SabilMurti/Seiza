@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dashboard/node_modules/
+dashboard/dist/
+.env
+.seiza/
+*.log
+*.err
+*.db*
+data/
