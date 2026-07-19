@@ -11,6 +11,7 @@ import { eventBroker } from "./core/events.js";
 import { NineRouterClient } from "./core/router.js";
 import type { AgentProfile } from "./core/agent.js";
 import { Agent } from "./core/agent.js";
+import { hitlManager } from "./core/hitl.js";
 
 let activeTasks: Task[] = [];
 import { fileURLToPath } from 'url';
@@ -111,36 +112,6 @@ export async function startServer(config: ServerConfig) {
     app.use(cors());
     app.use(express.json());
 
-    // HITL Approval Endpoint
-    app.post('/api/tasks/:id/approve', (req, res) => {
-      const { id } = req.params;
-      const { action } = req.body;
-      
-      if (action !== 'approve' && action !== 'reject') {
-        return res.status(400).json({ error: 'Action must be "approve" or "reject"' });
-      }
-
-      const { hitlManager } = require('./core/hitl.js');
-      const resolved = hitlManager.resolveApproval(id, action === 'approve');
-      
-      if (resolved) {
-        res.json({ success: true, message: `Task ${id} ${action}d` });
-      } else {
-        res.status(404).json({ error: 'Task not found or not waiting for approval' });
-      }
-    });
-
-    const httpPort = config.port + 1;
-    app.listen(httpPort, () => {
-      console.log(`HTTP API server listening on port ${httpPort}`);
-    });
-  }
-
-  if (config.http) {
-    const app = express();
-    app.use(cors());
-    app.use(express.json());
-
     let sseTransport: SSEServerTransport | null = null;
 
     app.get("/messages", async (req, res) => {
@@ -155,6 +126,25 @@ export async function startServer(config: ServerConfig) {
         res.status(503).json({ error: "SSE Transport not connected" });
       }
     });
+
+    // HITL Approval Endpoint
+    app.post('/api/tasks/:id/approve', (req, res) => {
+      const { id } = req.params;
+      const { action } = req.body;
+      
+      if (action !== 'approve' && action !== 'reject') {
+        return res.status(400).json({ error: 'Action must be "approve" or "reject"' });
+      }
+
+      const resolved = hitlManager.resolveApproval(id, action === 'approve');
+      
+      if (resolved) {
+        res.json({ success: true, message: `Task ${id} ${action}d` });
+      } else {
+        res.status(404).json({ error: 'Task not found or not waiting for approval' });
+      }
+    });
+
     app.get("/api/events", (req, res) => {
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
