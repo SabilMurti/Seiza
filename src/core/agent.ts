@@ -1,3 +1,4 @@
+import { MCPBridgeManager } from "./bridge.js";
 import * as fs from "fs";
 import * as path from "path";
 import { NineRouterClient, ChatMessage } from "./router";
@@ -16,10 +17,12 @@ export class Agent {
   private client: NineRouterClient;
   private toolsEngine: NativeToolsEngine;
   private history: ChatMessage[] = [];
+  private bridgeManager?: MCPBridgeManager;
 
-  constructor(profile: AgentProfile, client: NineRouterClient) {
+  constructor(profile: AgentProfile, client: NineRouterClient, bridgeManager?: MCPBridgeManager) {
     this.profile = profile;
     this.client = client;
+    this.bridgeManager = bridgeManager;
     this.toolsEngine = new NativeToolsEngine();
     
     this.history.push({
@@ -167,14 +170,34 @@ export class Agent {
         console.log(`\nAgent ${this.profile.name} finished successfully.`);
         return response;
       }
+
+      // Extract MCP tool calls
+      const mcpRegex = /<mcp_call\s+server="([^"]+)"\s+tool="([^"]+)">([\s\S]*?)<\/mcp_call>/g;
+      let mcpMatch;
+      let mcpResults: string[] = [];
+      while ((mcpMatch = mcpRegex.exec(response)) !== null) {
+        const [fullMatch, server, tool, argsStr] = mcpMatch;
+        try {
+          const args = JSON.parse(argsStr.trim());
+          if (this.bridgeManager) {
+            console.log(`Executing MCP call: ${server}.${tool}`);
+            const res = await this.bridgeManager.callTool(server, tool, args);
+            mcpResults.push(`MCP call ${server}.${tool} result:\n${JSON.stringify(res, null, 2)}`);
+          } else {
+            mcpResults.push(`MCP call ${server}.${tool} failed: bridgeManager is not initialized.`);
+          }
+        } catch (e: unknown) {
+          mcpResults.push(`MCP call ${server}.${tool} error: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
       
       const toolResults = await this.parseAndExecuteTools(response);
       
-      if (toolResults.length > 0) {
-        const toolResultMessage = toolResults.join("\n\n");
+      if (toolResults.length > 0 || mcpResults.length > 0) {
+        const allResults = [...mcpResults, ...toolResults].join("\n\n");
         this.history.push({
           role: "user",
-          content: `Here are the results of your tool executions:\n\n${toolResultMessage}`
+          content: `Here are the results of your tool executions:\n\n${allResults}`
         });
       } else {
          // No tools called, but no finish tag either.
