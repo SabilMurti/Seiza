@@ -43,12 +43,26 @@ To connect Seiza to your editor/agent environment (e.g., Cursor, Antigravity IDE
 {
   "mcpServers": {
     "seiza": {
+
       "command": "npx",
       "args": ["-y", "github:SabilMurti/Seiza"]
     }
   }
 }
 ```
+
+---
+
+## 🔌 Bridging Downstream MCP Servers
+
+Seiza can proxy tools from other downstream MCP servers, allowing native agents to access external systems seamlessly.
+
+Recommended bridge presets:
+- **Amneshia Memory Hub**: Long-term SQLite FTS5 memory hub & Knowledge Graph.
+- **Codebase Memory MCP**: Cypher queries, graph discovery, and structural traces of your code.
+- **Context7 Documentation API**: Up-to-date documentation and code examples for modern frameworks.
+
+To add these, open the Seiza Dashboard and navigate to the **Bridge** tab to quick-add them via the presets.
 
 ---
 

@@ -50,12 +50,66 @@ export async function startServer(config: ServerConfig) {
           inputSchema: {
             type: "object",
             properties: {
-              prompt: {
-                type: "string",
-                description: "Detailed instructions for the task"
-              }
+              prompt: { type: "string" },
+              dag: { type: "array", items: { type: "object" } }
             },
             required: ["prompt"]
+          }
+        },
+        {
+          name: "run_single_agent",
+          description: "Runs a single specific agent directly",
+          inputSchema: {
+            type: "object",
+            properties: {
+              agentName: { type: "string" },
+              prompt: { type: "string" },
+              modelOverride: { type: "string" }
+            },
+            required: ["agentName", "prompt"]
+          }
+        },
+        {
+          name: "list_seiza_agents",
+          description: "Returns list of all available agent templates in ./agents/ with their names, descriptions, models, and allowed tools",
+          inputSchema: { type: "object", properties: {} }
+        },
+        {
+          name: "list_seiza_models",
+          description: "Returns list of available 9router models and current role assignments from ConfigManager",
+          inputSchema: { type: "object", properties: {} }
+        },
+        {
+          name: "get_task_status",
+          description: "Returns live status, steps, and logs of active or completed tasks",
+          inputSchema: {
+            type: "object",
+            properties: {
+              taskId: { type: "string" }
+            }
+          }
+        },
+        {
+          name: "list_bridge_tools",
+          description: "Returns all tools exposed by connected bridge servers",
+          inputSchema: {
+            type: "object",
+            properties: {
+              serverName: { type: "string" }
+            }
+          }
+        },
+        {
+          name: "call_bridge_tool",
+          description: "Directly proxies a tool execution to a downstream bridged MCP server",
+          inputSchema: {
+            type: "object",
+            properties: {
+              serverName: { type: "string" },
+              toolName: { type: "string" },
+              arguments: { type: "object", additionalProperties: true }
+            },
+            required: ["serverName", "toolName", "arguments"]
           }
         }
       ]
@@ -63,37 +117,39 @@ export async function startServer(config: ServerConfig) {
   });
 
   mcpServer.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
-    if (request.params.name === "run_seiza_task") {
-      const prompt = request.params.arguments?.prompt as string;
+    const name = request.params.name;
+    const args = request.params.arguments || {};
+
+    if (name === "run_seiza_task") {
+      const prompt = args.prompt as string;
       if (!prompt) {
         throw new Error("Prompt is required");
       }
       
       const agentsDir = path.join(__dirname, "..", "agents");
-      
-      const profilePath = path.join(agentsDir, "planner.md");
-      const profileContent = fs.readFileSync(profilePath, 'utf8');
-      const parts = profileContent.split('---');
-      let profile: AgentProfile;
-      if (parts.length >= 3) {
-          profile = JSON.parse(parts[1]) as AgentProfile;
-          profile.systemPrompt = parts.slice(2).join('---').trim();
-      } else {
-          profile = { name: "planner", model: "auto", tools: [], systemPrompt: profileContent };
-      }
-      
-      const client = new NineRouterClient({ apiKey: process.env.OPENROUTER_API_KEY || '' });
-      
-      const planner = new Agent(profile, client);
-      
-      const plannerResult = await planner.run(prompt);
       let parsedTasks: Task[];
-      try {
-          const match = plannerResult.match(/```json\n([\s\S]*?)\n```/);
-          const jsonString = match ? match[1] : plannerResult;
-          parsedTasks = JSON.parse(jsonString) as Task[];
-      } catch (e) {
-          throw new Error("Failed to parse Planner output as JSON DAG: " + String(e) + "\nOutput was: " + plannerResult);
+
+      if (Array.isArray(args.dag) && args.dag.length > 0) {
+        parsedTasks = args.dag as Task[];
+      } else {
+        const profilePath = path.join(agentsDir, "planner.md");
+        let profile: AgentProfile;
+        if (fs.existsSync(profilePath)) {
+           profile = Agent.loadFromFile(profilePath);
+        } else {
+           profile = { name: "planner", model: "auto", tools: [], systemPrompt: "You are a planner." };
+        }
+        
+        const client = new NineRouterClient({ apiKey: process.env.OPENROUTER_API_KEY || '' });
+        const planner = new Agent(profile, client, bridgeManager);
+        const plannerResult = await planner.run(prompt);
+        try {
+            const match = plannerResult.match(/```json\n([\s\S]*?)\n```/);
+            const jsonString = match ? match[1] : plannerResult;
+            parsedTasks = JSON.parse(jsonString) as Task[];
+        } catch (e) {
+            throw new Error("Failed to parse Planner output as JSON DAG: " + String(e) + "\nOutput was: " + plannerResult);
+        }
       }
       
       const runner = new DAGRunner(parsedTasks, agentsDir);
@@ -109,7 +165,94 @@ export async function startServer(config: ServerConfig) {
         }]
       };
     }
-    throw new Error(`Unknown tool: ${request.params.name}`);
+
+    if (name === "run_single_agent") {
+      const agentName = args.agentName as string;
+      const prompt = args.prompt as string;
+      const modelOverride = args.modelOverride as string | undefined;
+
+      const agentsDir = path.join(__dirname, "..", "agents");
+      const profilePath = path.join(agentsDir, `${agentName}.md`);
+      if (!fs.existsSync(profilePath)) {
+        throw new Error(`Agent ${agentName} not found.`);
+      }
+      const profile = Agent.loadFromFile(profilePath);
+      if (modelOverride) {
+        profile.model = modelOverride;
+      }
+      const client = new NineRouterClient({ apiKey: process.env.OPENROUTER_API_KEY || '' });
+      const agent = new Agent(profile, client, bridgeManager);
+      const result = await agent.run(prompt);
+      return {
+        content: [{ type: "text", text: result }]
+      };
+    }
+
+    if (name === "list_seiza_agents") {
+      const agentsDir = path.join(__dirname, "..", "agents");
+      let agents: unknown[] = [];
+      try {
+        const files = fs.readdirSync(agentsDir).filter(f => f.endsWith('.md'));
+        agents = files.map(f => Agent.loadFromFile(path.join(agentsDir, f)));
+      } catch (e) {
+        console.error("Failed to list agents", e);
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(agents, null, 2) }]
+      };
+    }
+
+    if (name === "list_seiza_models") {
+       const models = [
+          "9router/ag/gemini-3.1-pro-low",
+          "9router/ag/gemini-3.1-flash-lite",
+          "9router/ag/gemini-3-flash",
+          "9router/ag/claude-sonnet-4-6"
+       ];
+       return {
+         content: [{
+           type: "text",
+           text: JSON.stringify({
+             models,
+             roles: configManager.getConfig().modelRoles
+           }, null, 2)
+         }]
+       };
+    }
+
+    if (name === "get_task_status") {
+       const taskId = args.taskId as string | undefined;
+       let result = activeTasks;
+       if (taskId) {
+         result = activeTasks.filter(t => t.id === taskId);
+       }
+       return {
+         content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+       };
+    }
+
+    if (name === "list_bridge_tools") {
+       const serverName = args.serverName as string | undefined;
+       const tools = bridgeManager.listAllTools();
+       let result = tools;
+       if (serverName) {
+          result = tools.filter(t => t.server === serverName);
+       }
+       return {
+         content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+       };
+    }
+
+    if (name === "call_bridge_tool") {
+       const serverName = args.serverName as string;
+       const toolName = args.toolName as string;
+       const toolArgs = args.arguments as Record<string, unknown>;
+       const result = await bridgeManager.callTool(serverName, toolName, toolArgs);
+       return {
+         content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+       };
+    }
+    throw new Error(`Unknown tool: ${name}`);
   });
 
   if (config.http) {

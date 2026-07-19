@@ -1,382 +1,124 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { SettingsTab } from './components/SettingsTab';
 import { BridgeTab } from './components/BridgeTab';
-import { Play, RotateCcw, Trash2, Cpu, Activity, LayoutDashboard, Terminal, CheckCircle2, Circle, Clock, AlertCircle, Settings, Network, BookOpen } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
-interface AgentConfig {
-  name: string;
-  content: string;
-}
-
-interface Task {
-  id: string;
-  agent: 'planner' | 'coder' | 'reviewer';
-  prompt: string;
-  dependencies: string[];
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'hitl_paused';
-  result?: string;
-  error?: string;
-}
-
+import { Sidebar, type TabId } from './components/Sidebar';
+import { Header } from './components/Header';
+import { Network, Terminal, FileCode } from 'lucide-react';
 interface LogEvent {
   id: string;
-  timestamp: Date;
-  type: 'info' | 'error' | 'success';
-  agent?: string;
+  timestamp: number;
+  type: 'info' | 'success' | 'warning' | 'error';
   message: string;
+  agent: 'system' | 'planner' | 'coder' | 'reviewer';
 }
-
 function App() {
-  const [config, setConfig] = useState<{dataDir?: string, port?: number} | null>(null);
-  const [agents, setAgents] = useState<AgentConfig[]>([]);
-  const [activeAgentIndex, setActiveAgentIndex] = useState(0);
-  const [agentContent, setAgentContent] = useState("");
-  
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  };
+
   const [logs, setLogs] = useState<LogEvent[]>([]);
-  const logsEndRef = useRef<HTMLDivElement>(null);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'bridge' | 'directives'>('overview');
-  const [metrics] = useState({
-    planner: { spent: 0.12, tokens: 4200 },
-    coder: { spent: 1.45, tokens: 18500 },
-    reviewer: { spent: 0.05, tokens: 1200 }
-  });
-
-  // Setup SSE & Initial fetch
   useEffect(() => {
-    fetch('/api/config').then(res => res.json()).then(setConfig).catch(console.error);
     
-    fetch('/api/agents')
-      .then(res => res.json())
-      .then(data => {
-        if (data.agents && data.agents.length > 0) {
-          setAgents(data.agents);
-          setAgentContent(data.agents[0].content);
-        }
-      })
-      .catch(console.error);
-
-    fetch('/api/tasks')
-      .then(res => res.json())
-      .then(data => {
-        if (data.tasks) setTasks(data.tasks);
-      })
-      .catch(console.error);
-
-    const eventSource = new EventSource('/api/events');
-    
-    eventSource.addEventListener('task_started', (e) => {
+    const es = new EventSource('/api/events');
+    es.addEventListener('task_started', (e: MessageEvent) => {
       const data = JSON.parse(e.data);
-      addLog({
-        type: 'info',
-        agent: data.task.agent,
-        message: `Task ${data.task.id} started.`
-      });
-      updateTask(data.task);
-    });
-    
-    eventSource.addEventListener('task_completed', (e) => {
-      const data = JSON.parse(e.data);
-      addLog({
-        type: 'success',
-        agent: data.task.agent,
-        message: `Task ${data.task.id} completed.`
-      });
-      updateTask(data.task);
-    });
-    
-    eventSource.addEventListener('task_failed', (e) => {
-      const data = JSON.parse(e.data);
-      addLog({
-        type: 'error',
-        agent: data.task.agent,
-        message: `Task ${data.task.id} failed: ${data.task.error}`
-      });
-      updateTask(data.task);
+      console.log('Task started:', data);
     });
 
-    return () => eventSource.close();
+    return () => es.close();
   }, []);
 
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
-
-  const updateTask = (updatedTask: Task) => {
-    setTasks(prev => {
-      const idx = prev.findIndex(t => t.id === updatedTask.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = updatedTask;
-        return next;
-      }
-      return [...prev, updatedTask];
-    });
+  const clearLogs = () => setLogs([]);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleSearch = (_query: string) => {
+    // no-op for now
   };
-
-  const addLog = (log: Omit<LogEvent, 'id' | 'timestamp'>) => {
-    setLogs(prev => [...prev, { ...log, id: Math.random().toString(36).substr(2, 9), timestamp: new Date() }]);
-  };
-
-  const saveAgent = async () => {
-    if (!agents[activeAgentIndex]) return;
-    const name = agents[activeAgentIndex].name;
-    try {
-      const res = await fetch(`/api/agents/${name}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: agentContent })
-      });
-      if (res.ok) {
-        const updatedAgents = [...agents];
-        updatedAgents[activeAgentIndex].content = agentContent;
-        setAgents(updatedAgents);
-        addLog({ type: 'success', message: `Saved agent config: ${name}.md` });
-      }
-    } catch (e) {
-      addLog({ type: 'error', message: `Failed to save ${name}.md` });
-    }
-  };
-
-  const clearTasks = async () => {
-    await fetch('/api/tasks/clear', { method: 'POST' });
-    setTasks([]);
-    setLogs([]);
-    addLog({ type: 'info', message: 'Task history cleared.' });
-  };
-
-  const mockTrigger = async () => {
-    addLog({ type: 'info', message: 'Triggered mock run...' });
-    // Wait for real MCP trigger to test properly
-  };
-
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-300 font-sans flex flex-col">
-      {/* TOP NAVIGATION TABS */}
-      <header className="bg-zinc-900 border-b border-zinc-800 p-4 sticky top-0 z-10 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-            <LayoutDashboard className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold text-zinc-100 tracking-tight leading-none">SEIZA</h1>
-            <p className="text-[10px] text-zinc-500 mt-0.5 font-mono">Agentic Workflow Engine</p>
-          </div>
-        </div>
-        
-        <nav className="flex space-x-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
-          <button onClick={() => setActiveTab('overview')} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-2", activeTab === 'overview' ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:text-zinc-200")}>
-            <Activity className="w-4 h-4" /> Overview
-          </button>
-          <button onClick={() => setActiveTab('settings')} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-2", activeTab === 'settings' ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:text-zinc-200")}>
-            <Settings className="w-4 h-4" /> Settings
-          </button>
-          <button onClick={() => setActiveTab('bridge')} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-2", activeTab === 'bridge' ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:text-zinc-200")}>
-            <Network className="w-4 h-4" /> Bridge
-          </button>
-          <button onClick={() => setActiveTab('directives')} className={cn("px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-2", activeTab === 'directives' ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:text-zinc-200")}>
-            <BookOpen className="w-4 h-4" /> Directives
-          </button>
-        </nav>
-        
-        <div className="flex items-center gap-4 text-xs font-mono">
-           <span className="text-zinc-500">PORT: <span className="text-zinc-300">{config?.port || '----'}</span></span>
-           <div className="h-4 w-px bg-zinc-800"></div>
-           <span className="text-emerald-500 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span> Online</span>
-        </div>
-      </header>
+    <div className="w-screen h-screen overflow-hidden bg-[#09090b] flex font-sans text-zinc-100">
+      {/* Left Sidebar */}
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
-      {/* MAIN CONTENT AREA */}
-      <main className="flex-1 flex overflow-hidden">
-        
-        {/* TAB: OVERVIEW */}
-        {activeTab === 'overview' && (
-          <div className="w-full p-4 sm:p-6 lg:p-8 flex flex-col gap-6 overflow-y-auto">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              
-              <div className="lg:col-span-8 flex flex-col gap-6">
-                {/* DAG VISUALIZER */}
-                <div className="bg-zinc-900/60 backdrop-blur-md border border-zinc-800 rounded-xl flex flex-col min-h-[250px] shadow-lg overflow-hidden">
-                  <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/80">
-                    <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                      <Cpu className="w-4 h-4 text-zinc-400" /> Live Pipeline
-                    </h2>
-                    <span className="px-2 py-0.5 rounded-full bg-zinc-800 text-[10px] font-mono text-zinc-400 border border-zinc-700">
-                      {tasks.length} tasks
-                    </span>
-                  </div>
-                  <div className="p-6 flex-1 overflow-x-auto">
-                    {tasks.length === 0 ? (
-                      <div className="h-full flex flex-col items-center justify-center text-zinc-500 space-y-3">
-                        <Circle className="w-8 h-8 opacity-20" />
-                        <p className="text-sm">No active tasks</p>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-4 flex-nowrap">
-                        {tasks.map((task, i) => (
-                          <div key={task.id} className="flex items-center shrink-0">
-                            <div className={cn(
-                              "p-4 rounded-lg border min-w-[200px] transition-all",
-                              task.status === 'completed' ? "bg-emerald-500/5 border-emerald-500/20" :
-                              task.status === 'running' ? "bg-blue-500/5 border-blue-500/30 ring-1 ring-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]" :
-                              task.status === 'hitl_paused' ? "bg-amber-500/10 border-amber-500/30 ring-1 ring-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]" :
-                              task.status === 'failed' ? "bg-red-500/5 border-red-500/20" :
-                              "bg-zinc-900 border-zinc-800"
-                            )}>
-                              <div className="flex items-center gap-3 mb-2">
-                                {task.status === 'completed' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-                                {task.status === 'running' && <Clock className="w-4 h-4 text-blue-400 animate-pulse" />}
-                                {task.status === 'hitl_paused' && <AlertCircle className="w-4 h-4 text-amber-400 animate-pulse" />}
-                                {task.status === 'failed' && <AlertCircle className="w-4 h-4 text-red-400" />}
-                                {task.status === 'pending' && <Circle className="w-4 h-4 text-zinc-500" />}
-                                <span className={cn(
-                                  "text-xs font-bold uppercase tracking-wider",
-                                  task.status === 'completed' ? "text-emerald-400" :
-                                  task.status === 'running' ? "text-blue-400" :
-                                  task.status === 'hitl_paused' ? "text-amber-400" :
-                                  task.status === 'failed' ? "text-red-400" :
-                                  "text-zinc-500"
-                                )}>{task.agent}</span>
-                              </div>
-                              <div className="text-xs text-zinc-400 truncate max-w-[160px] font-mono" title={task.prompt}>
-                                {task.prompt}
-                              </div>
-                              {task.status === 'hitl_paused' && (
-                                <div className="mt-3 flex gap-2">
-                                  <button onClick={() => fetch(`http://localhost:${(config?.port || 3000) + 1}/api/tasks/${task.id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'approve' }) })} className="px-2 py-1 bg-emerald-500/20 text-emerald-400 text-[10px] rounded hover:bg-emerald-500/30">Approve</button>
-                                  <button onClick={() => fetch(`http://localhost:${(config?.port || 3000) + 1}/api/tasks/${task.id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reject' }) })} className="px-2 py-1 bg-red-500/20 text-red-400 text-[10px] rounded hover:bg-red-500/30">Reject</button>
-                                </div>
-                              )}
-                            </div>
-                            {i < tasks.length - 1 && <div className="w-8 h-px bg-zinc-700 mx-2" />}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Header */}
+        <Header 
+          onSearch={handleSearch}
+          onClearLogs={clearLogs}
+          onRefreshStats={() => {
+            showToast('Stats refreshed', 'success');
+          }}
+        />
 
-                {/* LIVE LOGS */}
-                <div className="bg-zinc-900/60 backdrop-blur-md border border-zinc-800 rounded-xl flex-1 flex flex-col min-h-[400px] shadow-lg overflow-hidden">
-                  <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/80">
-                    <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                      <Terminal className="w-4 h-4 text-zinc-400" /> Console Output
-                    </h2>
-                    <button onClick={() => setLogs([])} className="p-1 hover:bg-zinc-800 rounded text-zinc-500 hover:text-zinc-300 transition-colors">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <div className="p-4 flex-1 overflow-y-auto font-mono text-xs bg-[#0a0a0a]">
-                    {logs.length === 0 ? (
-                      <div className="text-zinc-600 flex items-center gap-2"><span className="animate-pulse">_</span> waiting for events...</div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {logs.map(log => (
-                          <div key={log.id} className="flex gap-3 hover:bg-zinc-900/50 p-1 rounded transition-colors group">
-                            <span className="text-zinc-600 shrink-0 select-none">[{log.timestamp.toLocaleTimeString([], { hour12: false })}]</span>
-                            {log.agent && <span className="shrink-0 w-20 text-blue-400/80 uppercase text-[10px] tracking-wider pt-0.5">{log.agent}</span>}
-                            <span className={cn("break-words", log.type === 'error' ? "text-red-400" : log.type === 'success' ? "text-emerald-400" : "text-zinc-300")}>{log.message}</span>
-                          </div>
-                        ))}
-                        <div ref={logsEndRef} />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="lg:col-span-4 flex flex-col gap-6">
-                {/* METRICS */}
-                <div className="bg-zinc-900/60 backdrop-blur-md border border-zinc-800 rounded-xl shadow-lg overflow-hidden">
-                  <div className="p-4 border-b border-zinc-800 bg-zinc-900/80">
-                    <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                      <Activity className="w-4 h-4 text-zinc-400" /> Metrics
-                    </h2>
-                  </div>
-                  <div className="p-4 space-y-4">
-                    {Object.entries(metrics).map(([agent, data]) => (
-                      <div key={agent} className="flex justify-between items-center bg-zinc-800/30 p-3 rounded-lg border border-zinc-700/30">
-                        <div>
-                          <div className="text-xs font-bold uppercase tracking-wider text-zinc-300 mb-1">{agent}</div>
-                          <div className="text-[10px] text-zinc-500 font-mono">{data.tokens.toLocaleString()} tokens</div>
+        {/* Scrollable Workspace */}
+        <main className="flex-1 min-h-0 relative p-6 overflow-y-auto">
+          {activeTab === 'overview' && (
+            <div className="h-full flex flex-col gap-6">
+               {/* Replace with OverviewView later */}
+               <div className="bg-[#121215] border border-[#27272a] rounded-lg p-6 flex-1 flex flex-col">
+                  <h2 className="text-xl font-bold font-mono text-zinc-100 flex items-center gap-2 mb-4">
+                    <Network className="w-5 h-5 text-emerald-400" />
+                    DAG Pipeline & Live Logs
+                  </h2>
+                  <div className="flex-1 bg-[#09090b] rounded border border-[#27272a] p-4 font-mono text-xs overflow-auto">
+                     {logs.map((log, i) => (
+                        <div key={i} className="py-1 border-b border-[#27272a]/50">
+                           <span className="text-zinc-500 mr-2">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                           <span className="text-emerald-400 mr-2">[{log.agent}]</span>
+                           <span className="text-zinc-300">{log.message}</span>
                         </div>
-                        <div className="text-right">
-                          <div className="text-sm font-mono text-emerald-400">${data.spent.toFixed(2)}</div>
-                        </div>
-                      </div>
-                    ))}
+                     ))}
                   </div>
-                </div>
-
-                {/* ACTIONS */}
-                <div className="flex gap-3 mt-auto">
-                  <button onClick={mockTrigger} className="flex-1 flex items-center justify-center gap-2 py-3 bg-zinc-100 hover:bg-white text-zinc-900 rounded-lg text-sm font-semibold transition-all active:scale-[0.98]">
-                    <Play className="w-4 h-4 fill-current" /> Run Task
-                  </button>
-                  <button onClick={clearTasks} className="px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-all active:scale-[0.98] border border-zinc-700">
-                    <RotateCcw className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-              
+               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* TAB: SETTINGS */}
-        {activeTab === 'settings' && (
-          <div className="w-full flex justify-center overflow-y-auto">
-            <SettingsTab />
-          </div>
-        )}
+          {activeTab === 'tasks' && (
+            <div className="h-full flex flex-col">
+               <h2 className="text-xl font-bold font-mono text-zinc-100 mb-6 flex items-center gap-2">
+                 <Terminal className="w-5 h-5 text-emerald-400" />
+                 Tasks History
+               </h2>
+               {/* Replace with TasksView later */}
+            </div>
+          )}
 
-        {/* TAB: BRIDGE */}
-        {activeTab === 'bridge' && (
-          <div className="w-full flex justify-center overflow-y-auto">
+          {activeTab === 'bridge' && (
             <BridgeTab />
-          </div>
-        )}
+          )}
 
-        {/* TAB: DIRECTIVES */}
-        {activeTab === 'directives' && (
-          <div className="w-full p-4 sm:p-6 lg:p-8 flex justify-center overflow-y-auto">
-            <div className="w-full max-w-4xl bg-zinc-900/60 backdrop-blur-md border border-zinc-800 rounded-xl shadow-lg flex flex-col overflow-hidden min-h-[600px]">
-               <div className="p-3 border-b border-zinc-800 bg-zinc-900/80 flex flex-wrap gap-2">
-                 {agents.map((ag, idx) => (
-                   <button
-                     key={ag.name}
-                     onClick={() => { setActiveAgentIndex(idx); setAgentContent(ag.content); }}
-                     className={cn("px-4 py-2 text-sm font-medium rounded-md transition-colors", activeAgentIndex === idx ? "bg-zinc-800 text-zinc-100 shadow-sm" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200")}
-                   >
-                     {ag.name}.md
-                   </button>
-                 ))}
-               </div>
-               <div className="flex-1 p-4 relative group">
-                  <textarea
-                    value={agentContent}
-                    onChange={(e) => setAgentContent(e.target.value)}
-                    className="w-full h-full bg-zinc-950 text-zinc-300 p-6 font-mono text-sm rounded-lg border border-zinc-800 focus:outline-none focus:border-zinc-700 focus:ring-1 focus:ring-zinc-700 resize-none transition-colors"
-                    spellCheck={false}
-                  />
-               </div>
-               <div className="p-4 border-t border-zinc-800 bg-zinc-900/80 flex justify-end gap-3">
-                 <button onClick={saveAgent} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-zinc-100 font-medium rounded-md transition-colors shadow-sm">
-                   Save Directives
-                 </button>
-               </div>
+          {activeTab === 'directives' && (
+            <div className="h-full flex flex-col">
+               <h2 className="text-xl font-bold font-mono text-zinc-100 mb-6 flex items-center gap-2">
+                 <FileCode className="w-5 h-5 text-emerald-400" />
+                 Agent Directives
+               </h2>
+               {/* Replace with DirectivesView later */}
             </div>
-          </div>
-        )}
+          )}
 
-      </main>
+          {activeTab === 'settings' && (
+             <SettingsTab />
+          )}
+        </main>
+      </div>
+
+      {/* Toast Notifications */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4.5 py-3 rounded bg-zinc-900 border border-[#27272a] shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-300 font-mono text-xs max-w-sm">
+          <span className={toast.type === 'success' ? 'text-emerald-400' : toast.type === 'error' ? 'text-red-400' : 'text-[#f59e0b]'}>
+            {toast.type === 'success' ? '✓' : toast.type === 'error' ? '✗' : '⚡'}
+          </span>
+          <span className="text-zinc-200">{toast.message}</span>
+          <button onClick={() => setToast(null)} className="ml-2 text-zinc-500 hover:text-zinc-300">×</button>
+        </div>
+      )}
     </div>
   );
 }

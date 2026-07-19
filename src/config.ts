@@ -28,8 +28,9 @@ export interface Config {
   bridgeServers: Array<{
     id: string;
     name: string;
-    command: string;
-    args: string[];
+    command?: string;
+    args?: string[];
+    serverUrl?: string;
     enabled: boolean;
   }>;
 }
@@ -42,6 +43,29 @@ const DEFAULT_CONFIG: Config = {
   hitl: { autoApproveSafeCommands: false },
   bridgeServers: []
 };
+
+export const RECOMMENDED_BRIDGES = [
+  {
+    id: "amneshia",
+    name: "amneshia",
+    command: "wsl.exe",
+    args: ["-e", "env", "PATH=/home/murtix/.local/share/fnm/node-versions/v24.18.0/installation/bin:/usr/bin:/bin", "/home/murtix/.local/share/fnm/node-versions/v24.18.0/installation/bin/amneshia"],
+    enabled: true
+  },
+  {
+    id: "codebase-memory-mcp",
+    name: "codebase-memory-mcp",
+    command: "wsl.exe",
+    args: ["-e", "/home/murtix/.local/bin/codebase-memory-mcp"],
+    enabled: true
+  },
+  {
+    id: "context7",
+    name: "context7",
+    serverUrl: "https://mcp.context7.com/mcp",
+    enabled: true
+  }
+];
 
 export class ConfigManager {
   private configPath: string;
