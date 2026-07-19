@@ -184,7 +184,11 @@ export async function startServer(config: ServerConfig) {
       if (modelOverride) {
         profile.model = modelOverride;
       }
-      const client = new NineRouterClient({ apiKey: process.env.OPENROUTER_API_KEY || '' });
+      const cfg = configManager.getConfig();
+      const client = new NineRouterClient({ 
+        apiKey: cfg.nineRouter.apiKey,
+        baseUrl: cfg.nineRouter.baseUrl
+      });
       const agent = new Agent(profile, client, bridgeManager, cwdOverride);
       const result = await agent.run(prompt);
       return {

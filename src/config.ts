@@ -5,7 +5,6 @@ export interface Config {
   nineRouter: {
     apiKey: string;
     baseUrl: string;
-    dailyBudgetUSD: number;
   };
   modelRoles: {
     planner: string;
@@ -36,7 +35,7 @@ export interface Config {
 }
 
 const DEFAULT_CONFIG: Config = {
-  nineRouter: { apiKey: "", baseUrl: "", dailyBudgetUSD: 5 },
+  nineRouter: { apiKey: "free", baseUrl: "http://localhost:20128/v1" },
   modelRoles: { planner: "", coder: "", reviewer: "", scout: "" },
   sandbox: { driver: "local", dockerImage: "ubuntu:latest", timeoutMs: 300000 },
   consensus: { maxRetries: 3, strictMode: false },

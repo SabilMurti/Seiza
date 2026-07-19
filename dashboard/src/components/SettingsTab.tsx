@@ -69,34 +69,18 @@ export function SettingsTab() {
               className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-200 focus:border-emerald-500 focus:outline-none" 
             />
           </div>
-          <div>
-            <label className="block text-sm text-zinc-400 mb-1">Daily Budget (USD)</label>
-            <input 
-              type="number"
-              value={config.nineRouter.dailyBudgetUSD}
-              onChange={e => setConfig({...config, nineRouter: {...config.nineRouter, dailyBudgetUSD: parseFloat(e.target.value)}})}
-              className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-200 focus:border-emerald-500 focus:outline-none" 
-            />
+          <div className="flex flex-col gap-2 pt-2 border-t border-zinc-800">
+            <button 
+              onClick={() => setConfig({...config, nineRouter: {...config.nineRouter, baseUrl: 'http://localhost:20128/v1', apiKey: 'free'}})}
+              className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-600/50 px-4 py-2 rounded-md font-medium transition-colors w-full text-center"
+            >
+              Auto-Config 9Router (Local Daemon / Free)
+            </button>
+            <p className="text-xs text-zinc-400 text-center leading-relaxed">
+              9Router Local Daemon is automatically pre-configured (<code className="text-emerald-400">http://localhost:20128/v1</code>). No payment or credit card required!
+            </p>
           </div>
         </div>
-
-        {/* Model Roles */}
-        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-lg space-y-4">
-          <h3 className="text-lg font-medium text-zinc-200">Agent Models</h3>
-          {Object.keys(config.modelRoles || {}).map(role => (
-            <div key={role}>
-              <label className="block text-sm text-zinc-400 mb-1 capitalize">{role} Model</label>
-              <input 
-                type="text"
-                value={config.modelRoles[role] || ''}
-                onChange={e => setConfig({...config, modelRoles: {...config.modelRoles, [role]: e.target.value}})}
-                placeholder="e.g. 9router/ag/gemini-3.1-pro"
-                className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-200 focus:border-emerald-500 focus:outline-none" 
-              />
-            </div>
-          ))}
-        </div>
-
         {/* Sandbox & Execution */}
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-lg space-y-4">
           <h3 className="text-lg font-medium text-zinc-200">Execution Sandbox</h3>

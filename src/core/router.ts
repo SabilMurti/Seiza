@@ -39,12 +39,12 @@ export class NineRouterClient {
   private totalTokensUsed: number = 0;
 
   constructor(options?: NineRouterClientOptions) {
-    this.apiKey = options?.apiKey || process.env.NINE_ROUTER_API_KEY || process.env.OPENAI_API_KEY || "";
-    this.baseUrl = options?.baseUrl || "https://api.9router.com/v1";
-
-    if (!this.apiKey) {
-      console.warn("NineRouterClient: API key is not set. Requests may fail.");
-    }
+    this.baseUrl = (options?.baseUrl && options.baseUrl.trim().length > 0)
+      ? options.baseUrl
+      : (process.env.NINE_ROUTER_BASE_URL || "http://localhost:20128/v1");
+    this.apiKey = (options?.apiKey && options.apiKey.trim().length > 0)
+      ? options.apiKey
+      : (process.env.NINE_ROUTER_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || "free");
   }
 
   public getTotalTokensUsed(): number {
