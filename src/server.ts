@@ -352,9 +352,42 @@ export async function startServer(config: ServerConfig) {
       try {
         const files = fs.readdirSync(agentsDir).filter(f => f.endsWith('.md'));
         const agents = files.map(f => {
+          const filePath = path.join(agentsDir, f);
+          const content = fs.readFileSync(filePath, 'utf-8');
+          let name = f.replace('.md', '');
+          let description = '';
+          let model = '';
+          let tools = '';
+          let systemPrompt = content;
+
+          if (content.startsWith('---')) {
+            const endFrontmatter = content.indexOf('---', 3);
+            if (endFrontmatter !== -1) {
+              const frontmatter = content.substring(3, endFrontmatter).trim();
+              systemPrompt = content.substring(endFrontmatter + 3).trim();
+              
+              frontmatter.split('\n').forEach(line => {
+                const [key, ...values] = line.split(':');
+                if (key && values.length > 0) {
+                  const val = values.join(':').trim();
+                  const cleanVal = val.replace(/^\[|\]$/g, '').replace(/^"|"$/g, '').replace(/^'|'$/g, '');
+                  if (key.trim() === 'name') name = cleanVal;
+                  if (key.trim() === 'description') description = cleanVal;
+                  if (key.trim() === 'model') model = cleanVal;
+                  if (key.trim() === 'tools') tools = cleanVal;
+                }
+              });
+            }
+          }
+
           return {
-            name: f.replace('.md', ''),
-            content: fs.readFileSync(path.join(agentsDir, f), 'utf-8')
+            name,
+            filename: f,
+            description,
+            model,
+            tools,
+            systemPrompt,
+            fullContent: content
           };
         });
         res.json({ agents });
@@ -367,16 +400,43 @@ export async function startServer(config: ServerConfig) {
     app.post("/api/agents/:name", (req, res) => {
       const agentsDir = path.join(__dirname, "..", "agents");
       const name = req.params.name;
-      const { content } = req.body;
+      const { model, description, tools, systemPrompt } = req.body;
       try {
         if (!fs.existsSync(agentsDir)) {
            fs.mkdirSync(agentsDir, { recursive: true });
         }
+        const content = `---
+name: ${name}
+description: ${description || ''}
+model: ${model || ''}
+tools: [${tools || ''}]
+---
+
+${systemPrompt || ''}`;
         fs.writeFileSync(path.join(agentsDir, `${name}.md`), content);
-        res.json({ success: true });
+        res.json({ success: true, agent: { name, filename: `${name}.md`, description, model, tools, systemPrompt, fullContent: content } });
       } catch (e) {
          console.error("Error writing agent:", e);
          res.status(500).json({ success: false, error: String(e) });
+      }
+    });
+
+    app.delete("/api/agents/:name", (req, res) => {
+      const agentsDir = path.join(__dirname, "..", "agents");
+      const name = req.params.name;
+      try {
+        const files = fs.readdirSync(agentsDir).filter(f => f.endsWith('.md'));
+        if (files.length <= 1) {
+          return res.status(400).json({ success: false, error: "Cannot delete the last agent." });
+        }
+        const filePath = path.join(agentsDir, `${name}.md`);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+        res.json({ success: true });
+      } catch (e) {
+        console.error("Error deleting agent:", e);
+        res.status(500).json({ success: false, error: String(e) });
       }
     });
 

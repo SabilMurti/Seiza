@@ -109,55 +109,77 @@ export function BridgeTab() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-120px)] gap-4 overflow-hidden mx-auto w-full">
+    <div className="flex h-full overflow-hidden mx-auto w-full">
       {/* Left Column: Servers */}
-      <div className="w-80 flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden shrink-0">
-        <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950">
-          <h3 className="font-semibold text-zinc-100 flex items-center gap-2">
-             <LucideServer className="w-4 h-4 text-emerald-400" /> Bridge Servers
-          </h3>
-          <button onClick={addServer} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-100" title="Add custom server">
-            <LucidePlus className="w-4 h-4" />
+      <div className="w-64 border-r border-[#27272a] bg-[#121215] flex flex-col shrink-0">
+        <div className="flex items-center justify-between p-4 border-b border-[#27272a]">
+          <h2 className="font-mono text-xs font-bold text-zinc-400">MCP BRIDGE SERVERS</h2>
+          <button
+            onClick={addServer}
+            className="bg-[#f59e0b] hover:bg-[#d97706] text-black px-2 py-1 rounded font-mono text-xs font-semibold flex items-center gap-1"
+          >
+            <LucidePlus className="w-3.5 h-3.5" />
+            Add Server
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {servers.map(s => (
-            <div 
-              key={s.id} 
-              onClick={() => setSelectedServer(s.id)}
-              className={`p-3 rounded border cursor-pointer group ${selectedServer === s.id ? 'bg-emerald-900/20 border-emerald-500/50' : 'bg-zinc-950 border-zinc-800 hover:border-zinc-700'}`}
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
+          {servers.map((server) => (
+            <div
+              key={server.id}
+              onClick={() => setSelectedServer(server.id)}
+              className={`p-3 rounded border cursor-pointer transition-colors ${
+                selectedServer === server.id
+                  ? 'bg-emerald-500/10 border-emerald-500/30'
+                  : 'bg-[#09090b] border-[#27272a] hover:border-zinc-700'
+              }`}
             >
-              <div className="flex justify-between items-start mb-2">
-                <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${s.enabled ? 'bg-emerald-500' : 'bg-zinc-600'}`} />
-                  <span className="font-medium text-zinc-200 truncate">{s.name}</span>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <LucideServer
+                    className={`w-4 h-4 shrink-0 ${
+                      selectedServer === server.id ? 'text-emerald-400' : 'text-zinc-500'
+                    }`}
+                  />
+                  <span className="font-mono text-xs font-bold text-zinc-200 truncate">
+                    {server.name}
+                  </span>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); removeServer(s.id); }} className="text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                   <LucideTrash2 className="w-4 h-4" />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeServer(server.id);
+                  }}
+                  className="text-zinc-500 hover:text-red-400 transition-colors"
+                >
+                  <LucideTrash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <div className="text-xs font-mono text-zinc-500 break-all">{s.command} {s.args?.join(' ')}</div>
+              <div className="font-mono text-[10px] text-zinc-500 font-semibold mt-1 break-all">
+                {server.command} {server.args?.join(' ')}
+              </div>
             </div>
           ))}
           {servers.length === 0 && (
-            <div className="text-sm text-zinc-500 text-center py-4">No servers registered.</div>
+            <div className="text-zinc-500 text-sm p-4 text-center border border-dashed border-[#27272a] rounded">
+              No bridge servers configured.
+            </div>
           )}
         </div>
       </div>
 
       {/* Middle Column: Tools Directory */}
-      <div className="flex-1 flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden min-w-0">
-        <div className="p-4 border-b border-zinc-800 bg-zinc-950">
-           <h3 className="font-semibold text-zinc-100">
-             {selectedServer ? `Tools for ${selectedServer}` : 'Select a server'}
+      <div className="flex-1 flex flex-col min-w-0 bg-[#09090b]">
+        <div className="p-4 border-b border-[#27272a] bg-[#121215]">
+           <h3 className="font-mono text-xs font-bold text-zinc-400">
+             {selectedServer ? `TOOLS FOR ${selectedServer.toUpperCase()}` : 'SELECT A SERVER'}
            </h3>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 grid grid-cols-1 xl:grid-cols-2 gap-3 content-start">
+        <div className="flex-1 flex flex-col gap-3 overflow-y-auto p-4">
            {!selectedServer && (
-             <div className="col-span-full text-center text-zinc-500 py-10">Select a server to view its tools.</div>
+             <div className="text-center text-zinc-500 py-10 font-mono text-xs">Select a server to view its tools.</div>
            )}
            {selectedServer && serverTools.length === 0 && (
-             <div className="col-span-full text-center text-zinc-500 py-10">No tools found for this server.</div>
+             <div className="text-center text-zinc-500 py-10 font-mono text-xs">No tools found for this server.</div>
            )}
            {serverTools.map(t => (
              <div 
@@ -167,11 +189,14 @@ export function BridgeTab() {
                  setToolArgs(JSON.stringify(t.inputSchema?.properties || {}, null, 2));
                  setToolResult('');
                }}
-               className={`p-4 rounded border cursor-pointer transition-colors flex flex-col gap-2 ${selectedTool?.name === t.name ? 'bg-emerald-900/20 border-emerald-500/50' : 'bg-zinc-950 border-zinc-800 hover:border-zinc-700'}`}
+               className={`p-4 rounded border cursor-pointer transition-colors flex flex-col gap-2 ${selectedTool?.name === t.name ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-[#121215] border-[#27272a] hover:border-zinc-700'}`}
              >
-               <div className="font-mono text-sm text-emerald-400 font-semibold truncate">{t.name}</div>
-               <div className="text-xs text-zinc-400 line-clamp-3" title={t.description}>{t.description || 'No description provided.'}</div>
-               <div className="mt-auto text-xs text-zinc-600 font-mono pt-2 border-t border-zinc-800">
+               <div className="flex items-center justify-between gap-4">
+                 <div className="font-mono text-sm font-bold text-zinc-100 break-all">{t.name}</div>
+                 <div className="text-[10px] font-mono text-zinc-400 bg-zinc-950 border border-zinc-800 px-2 py-0.5 rounded uppercase font-bold shrink-0">TOOL</div>
+               </div>
+               <div className="font-sans text-xs text-zinc-400 leading-relaxed">{t.description || 'No description provided.'}</div>
+               <div className="mt-auto text-[10px] text-zinc-500 font-mono pt-3 border-t border-[#27272a]/50">
                  {Object.keys(t.inputSchema?.properties || {}).length} parameters
                </div>
              </div>
@@ -180,25 +205,25 @@ export function BridgeTab() {
       </div>
 
       {/* Right Column: Sandbox */}
-      <div className="w-[420px] flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden shrink-0">
-        <div className="p-4 border-b border-zinc-800 bg-zinc-950 flex justify-between items-center">
-           <h3 className="font-semibold text-zinc-100 flex items-center gap-2">
-             <LucidePlay className="w-4 h-4 text-emerald-400" /> Tool Sandbox
+      <div className="w-[420px] flex flex-col bg-[#121215] border-l border-[#27272a] shrink-0">
+        <div className="p-4 border-b border-[#27272a] flex justify-between items-center">
+           <h3 className="font-mono text-xs font-bold text-zinc-400 flex items-center gap-2">
+             <LucidePlay className="w-3.5 h-3.5 text-emerald-400" /> TOOL SANDBOX
            </h3>
         </div>
         {selectedTool ? (
           <div className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
             <div className="flex-shrink-0">
-               <div className="font-mono text-sm text-emerald-400 mb-1 truncate">{selectedTool.name}</div>
-               <div className="text-xs text-zinc-400 line-clamp-3">{selectedTool.description}</div>
+               <div className="font-mono text-sm font-bold text-emerald-400 mb-1 break-all">{selectedTool.name}</div>
+               <div className="font-sans text-xs text-zinc-400 leading-relaxed">{selectedTool.description}</div>
             </div>
             
             <div className="flex flex-col gap-2 shrink-0">
-              <label className="text-xs text-zinc-400 font-medium">Arguments (JSON)</label>
+              <label className="font-mono text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Arguments (JSON)</label>
               <textarea 
                 value={toolArgs}
                 onChange={(e) => setToolArgs(e.target.value)}
-                className="w-full h-40 bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-200 font-mono text-xs focus:border-emerald-500 focus:outline-none resize-none custom-scrollbar"
+                className="w-full h-40 bg-[#09090b] border border-[#27272a] rounded p-3 text-zinc-200 font-mono text-xs focus:border-emerald-500 focus:outline-none resize-none custom-scrollbar"
                 spellCheck={false}
               />
             </div>
@@ -206,23 +231,23 @@ export function BridgeTab() {
             <button 
               onClick={handleExecuteTool}
               disabled={executing}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-zinc-100 py-2 rounded font-medium flex items-center justify-center gap-2 transition-colors disabled:opacity-50 shrink-0"
+              className="w-full bg-[#f59e0b] hover:bg-[#d97706] text-black py-2.5 rounded font-mono text-xs font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 shrink-0"
             >
-              {executing ? <LucideStopCircle className="w-4 h-4 animate-spin" /> : <LucidePlay className="w-4 h-4" />}
-              {executing ? 'Executing...' : 'Execute Tool'}
+              {executing ? <LucideStopCircle className="w-3.5 h-3.5 animate-spin" /> : <LucidePlay className="w-3.5 h-3.5" />}
+              {executing ? 'EXECUTING...' : 'EXECUTE TOOL'}
             </button>
 
             <div className="flex-1 flex flex-col gap-2 min-h-0">
-              <label className="text-xs text-zinc-400 font-medium">Output</label>
-              <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded p-3 overflow-auto custom-scrollbar">
-                 <pre className="text-xs font-mono text-zinc-300 whitespace-pre-wrap break-words">
+              <label className="font-mono text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Output</label>
+              <div className="flex-1 bg-[#09090b] border border-[#27272a] p-3 rounded font-mono text-[11px] text-zinc-300 overflow-auto custom-scrollbar">
+                 <pre className="whitespace-pre-wrap break-words">
                    {toolResult || 'No output yet.'}
                  </pre>
               </div>
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm p-8 text-center">
+          <div className="flex-1 flex items-center justify-center text-zinc-500 font-mono text-xs p-8 text-center">
             Select a tool from the middle column to execute it.
           </div>
         )}

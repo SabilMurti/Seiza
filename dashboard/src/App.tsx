@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { SettingsTab } from './components/SettingsTab';
 import { BridgeTab } from './components/BridgeTab';
 import { Sidebar, type TabId } from './components/Sidebar';
+import { DirectivesTab } from './components/DirectivesTab';
 import { Header } from './components/Header';
-import { Network, Terminal, FileCode } from 'lucide-react';
+import { Network, Terminal } from 'lucide-react';
 interface LogEvent {
   id: string;
   timestamp: number;
@@ -47,7 +48,7 @@ function App() {
     // no-op for now
   };
   return (
-    <div className="w-screen h-screen overflow-hidden bg-[#09090b] flex font-sans text-zinc-100">
+    <div className="w-screen h-screen overflow-hidden bg-[#09090b] flex font-sans text-zinc-100 md:flex-row flex-col">
       {/* Left Sidebar */}
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
@@ -101,13 +102,7 @@ function App() {
           )}
 
           {activeTab === 'directives' && (
-            <div className="h-full flex flex-col">
-               <h2 className="text-xl font-bold font-mono text-zinc-100 mb-6 flex items-center gap-2">
-                 <FileCode className="w-5 h-5 text-emerald-400" />
-                 Agent Directives
-               </h2>
-               {/* Replace with DirectivesView later */}
-            </div>
+            <DirectivesTab />
           )}
 
           {activeTab === 'settings' && (

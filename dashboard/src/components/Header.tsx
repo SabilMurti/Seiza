@@ -5,13 +5,13 @@ interface HeaderProps {
   onSearch: (query: string) => void;
   onClearLogs: () => void;
   onRefreshStats: () => void;
-  config?: Record<string, unknown> | null;
+  config?: Record<string, unknown> | null; // left here just in case, but no longer rendered in Header
 }
 export const Header: React.FC<HeaderProps> = ({
   onSearch,
   onClearLogs,
   onRefreshStats,
-  config
+  // config - keeping for interface compat
 }) => {
   const [query, setQuery] = useState('');
 
@@ -39,23 +39,6 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Right Stats & Status Badge row */}
       <div className="flex items-center gap-6">
         
-        {/* Active Model Badges */}
-        <div className="flex items-center gap-2 hidden lg:flex">
-             {config?.modelRoles ? (
-               Object.entries(config.modelRoles as Record<string, string>).map(([role, model]) => (
-                 <div key={role} className="px-2 py-0.5 bg-[#09090b] border border-[#27272a] rounded text-[10px] font-mono text-zinc-400 flex items-center gap-1.5">
-                   <span className={`w-1.5 h-1.5 rounded-full ${role === 'planner' ? 'bg-blue-400' : role === 'coder' ? 'bg-orange-400' : 'bg-purple-400'}`}></span>
-                   {role.charAt(0).toUpperCase() + role.slice(1)}: {model.split('/').pop()}
-                 </div>
-               ))
-             ) : (
-               <div className="px-2 py-0.5 bg-[#09090b] border border-[#27272a] rounded text-[10px] font-mono text-zinc-400">
-                 Loading config...
-               </div>
-             )}
-        </div>
-
-
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
             <button
