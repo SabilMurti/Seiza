@@ -22,9 +22,13 @@ export interface Task {
 export class DAGRunner {
   private tasks: Map<string, Task> = new Map();
   private agentsDir: string;
+  private modelOverride?: string;
+  private cwdOverride?: string;
 
-  constructor(tasks: Task[], agentsDir: string) {
+  constructor(tasks: Task[], agentsDir: string, modelOverride?: string, cwdOverride?: string) {
     this.agentsDir = agentsDir;
+    this.modelOverride = modelOverride;
+    this.cwdOverride = cwdOverride;
     for (const task of tasks) {
       if (this.tasks.has(task.id)) {
         throw new Error(`Duplicate task ID: ${task.id}`);
@@ -154,7 +158,10 @@ export class DAGRunner {
           profile = { name: task.agent, model: "auto", tools: [], systemPrompt: profileContent };
       }
       const client = new NineRouterClient({ apiKey: process.env.OPENROUTER_API_KEY || '' });
-      const agent = new Agent(profile, client);
+      if (this.modelOverride) {
+        profile.model = this.modelOverride;
+      }
+      const agent = new Agent(profile, client, undefined, this.cwdOverride);
       
       // If the task is a coder task, we might want to run consensus
       let result = await agent.run(task.prompt);
@@ -173,7 +180,10 @@ export class DAGRunner {
                reviewerProfile.systemPrompt = revContent;
            }
         }
-        const reviewerAgent = new Agent(reviewerProfile, client);
+        if (this.modelOverride) {
+          reviewerProfile.model = this.modelOverride;
+        }
+        const reviewerAgent = new Agent(reviewerProfile, client, undefined, this.cwdOverride);
         const consensus = new ConsensusManager(agent, reviewerAgent);
         
         const consensusResult = await consensus.coordinate(task, result);

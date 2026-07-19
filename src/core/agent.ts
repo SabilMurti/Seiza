@@ -19,11 +19,11 @@ export class Agent {
   private history: ChatMessage[] = [];
   private bridgeManager?: MCPBridgeManager;
 
-  constructor(profile: AgentProfile, client: NineRouterClient, bridgeManager?: MCPBridgeManager) {
+  constructor(profile: AgentProfile, client: NineRouterClient, bridgeManager?: MCPBridgeManager, cwdOverride?: string) {
     this.profile = profile;
     this.client = client;
     this.bridgeManager = bridgeManager;
-    this.toolsEngine = new NativeToolsEngine();
+    this.toolsEngine = new NativeToolsEngine(cwdOverride);
     
     this.history.push({
       role: "system",

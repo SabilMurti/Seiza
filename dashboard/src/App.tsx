@@ -23,6 +23,7 @@ function App() {
   };
 
   const [logs, setLogs] = useState<LogEvent[]>([]);
+  const [config, setConfig] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     
@@ -31,6 +32,11 @@ function App() {
       const data = JSON.parse(e.data);
       console.log('Task started:', data);
     });
+
+    fetch('/api/config')
+      .then(res => res.json())
+      .then(data => setConfig(data))
+      .catch(err => console.error("Failed to load config", err));
 
     return () => es.close();
   }, []);
@@ -54,6 +60,7 @@ function App() {
           onRefreshStats={() => {
             showToast('Stats refreshed', 'success');
           }}
+          config={config}
         />
 
         {/* Scrollable Workspace */}

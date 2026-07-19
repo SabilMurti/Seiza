@@ -31,7 +31,7 @@ export class MCPBridgeManager {
       const toolsList = await client.listTools();
       if (toolsList?.tools) {
         for (const tool of toolsList.tools) {
-          this.tools.set(`${serverConfig.id}:${tool.name}`, tool);
+          this.tools.set(`${serverConfig.id}:${tool.name}`, { ...tool, server: serverConfig.id });
         }
       }
       console.log(`Connected bridge server: ${serverConfig.name}`);

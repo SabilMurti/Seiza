@@ -1,37 +1,12 @@
 import { useState, useEffect } from 'react';
 import { LucideServer, LucidePlus, LucideTrash2, LucidePlay, LucideStopCircle } from 'lucide-react';
 
-const RECOMMENDED_BRIDGES = [
-  {
-    id: "amneshia",
-    name: "amneshia",
-    command: "wsl.exe",
-    args: ["-e", "env", "PATH=/home/murtix/.local/share/fnm/node-versions/v24.18.0/installation/bin:/usr/bin:/bin", "/home/murtix/.local/share/fnm/node-versions/v24.18.0/installation/bin/amneshia"],
-    enabled: true
-  },
-  {
-    id: "codebase-memory-mcp",
-    name: "codebase-memory-mcp",
-    command: "wsl.exe",
-    args: ["-e", "/home/murtix/.local/bin/codebase-memory-mcp"],
-    enabled: true
-  },
-  {
-    id: "context7",
-    name: "context7",
-    serverUrl: "https://mcp.context7.com/mcp",
-    enabled: true
-  }
-];
-
-
 export function BridgeTab() {
   const [servers, setServers] = useState<any[]>([]);
-  const [tools, setTools] = useState<any[]>([]);
+  const [serverTools, setServerTools] = useState<any[]>([]);
   
   useEffect(() => {
     fetchServers();
-    fetchTools();
   }, []);
 
   const fetchServers = () => {
@@ -41,181 +16,216 @@ export function BridgeTab() {
       .catch(console.error);
   };
 
-  const fetchTools = () => {
-    fetch('/api/bridge/tools')
-      .then(res => res.json())
-      .then(data => setTools(data))
-      .catch(console.error);
-  };
+  const addServer = async () => {
+    const name = prompt("Server ID (e.g. mcp-sqlite):");
+    if (!name) return;
+    const command = prompt("Command (e.g. npx):");
+    if (!command) return;
+    const argsStr = prompt("Args (comma separated, e.g. -y,@modelcontextprotocol/server-sqlite,/tmp/test.db):");
+    const args = argsStr ? argsStr.split(",").map(s => s.trim()) : [];
+    
+    const newServer = {
+      id: name,
+      name: name,
+      command,
+      args,
+      enabled: true
+    };
 
-  const handleSaveServers = async (newServers: any[]) => {
     try {
       await fetch('/api/bridge/servers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newServers)
+        body: JSON.stringify(newServer)
       });
-      setServers(newServers);
-      setTimeout(fetchTools, 1000); // Reload tools after a short delay
+      fetchServers();
     } catch (e) {
       console.error(e);
-      alert('Failed to save servers');
+      alert('Failed to add server');
     }
   };
 
-  const toggleServer = (id: string) => {
-    const updated = servers.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s);
-    handleSaveServers(updated);
+  const removeServer = async (id: string) => {
+    if (!confirm(`Remove server ${id}?`)) return;
+    try {
+      await fetch(`/api/bridge/servers/${id}`, { method: 'DELETE' });
+      fetchServers();
+      if (selectedServer === id) {
+         setSelectedServer(null);
+         setServerTools([]);
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Failed to remove server');
+    }
   };
 
-  const removeServer = (id: string) => {
-    const updated = servers.filter(s => s.id !== id);
-    handleSaveServers(updated);
-  };
+  const [selectedServer, setSelectedServer] = useState<string | null>(null);
+  const [selectedTool, setSelectedTool] = useState<any | null>(null);
+  const [toolArgs, setToolArgs] = useState<string>('{}');
+  const [toolResult, setToolResult] = useState<string>('');
+  const [executing, setExecuting] = useState(false);
 
-  const addServer = () => {
-    const newServer = {
-      id: `server-${Date.now()}`,
-      name: 'New Server',
-      command: 'node',
-      args: ['path/to/server.js'],
-      enabled: false
-    };
-    handleSaveServers([...servers, newServer]);
+  useEffect(() => {
+    if (selectedServer) {
+      fetch(`/api/bridge/tools?serverId=${selectedServer}`)
+        .then(res => res.json())
+        .then(data => setServerTools(data))
+        .catch(console.error);
+      setSelectedTool(null);
+      setToolResult('');
+    }
+  }, [selectedServer]);
+
+  const handleExecuteTool = async () => {
+    if (!selectedServer || !selectedTool) return;
+    setExecuting(true);
+    setToolResult('Executing...');
+    try {
+      let parsedArgs = {};
+      try {
+        parsedArgs = JSON.parse(toolArgs);
+      } catch (e) {
+        setToolResult('Invalid JSON arguments');
+        setExecuting(false);
+        return;
+      }
+      const res = await fetch('/api/bridge/call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serverId: selectedServer,
+          toolName: selectedTool.name,
+          arguments: parsedArgs
+        })
+      });
+      const data = await res.json();
+      setToolResult(JSON.stringify(data, null, 2));
+    } catch (e: any) {
+      setToolResult(String(e));
+    } finally {
+      setExecuting(false);
+    }
   };
 
   return (
-    <div className="p-8 space-y-8 max-w-5xl">
-      <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
-        <h2 className="text-2xl font-semibold text-emerald-400 flex items-center gap-3">
-          <LucideServer className="w-6 h-6" /> Universal MCP Bridge
-        </h2>
-        <button 
-          onClick={addServer}
-          className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2 rounded-md font-medium transition-colors flex items-center gap-2"
-        >
-          <LucidePlus className="w-4 h-4" /> Add Server
-        </button>
+    <div className="flex h-[calc(100vh-120px)] gap-4 overflow-hidden mx-auto w-full">
+      {/* Left Column: Servers */}
+      <div className="w-80 flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden shrink-0">
+        <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950">
+          <h3 className="font-semibold text-zinc-100 flex items-center gap-2">
+             <LucideServer className="w-4 h-4 text-emerald-400" /> Bridge Servers
+          </h3>
+          <button onClick={addServer} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-100" title="Add custom server">
+            <LucidePlus className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {servers.map(s => (
+            <div 
+              key={s.id} 
+              onClick={() => setSelectedServer(s.id)}
+              className={`p-3 rounded border cursor-pointer group ${selectedServer === s.id ? 'bg-emerald-900/20 border-emerald-500/50' : 'bg-zinc-950 border-zinc-800 hover:border-zinc-700'}`}
+            >
+              <div className="flex justify-between items-start mb-2">
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${s.enabled ? 'bg-emerald-500' : 'bg-zinc-600'}`} />
+                  <span className="font-medium text-zinc-200 truncate">{s.name}</span>
+                </div>
+                <button onClick={(e) => { e.stopPropagation(); removeServer(s.id); }} className="text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                   <LucideTrash2 className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="text-xs font-mono text-zinc-500 break-all">{s.command} {s.args?.join(' ')}</div>
+            </div>
+          ))}
+          {servers.length === 0 && (
+            <div className="text-sm text-zinc-500 text-center py-4">No servers registered.</div>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="space-y-6">
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium text-zinc-200">Quick Add Recommended Presets</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {RECOMMENDED_BRIDGES.map(preset => (
-                <button
-                  key={preset.id}
-                  onClick={() => {
-                    if (!servers.find(s => s.id === preset.id)) {
-                      handleSaveServers([...servers, preset]);
-                    }
-                  }}
-                  className="p-3 bg-zinc-900 border border-zinc-800 hover:border-emerald-500/50 rounded-lg text-left transition-colors flex flex-col gap-2"
-                >
-                  <span className="text-emerald-400 font-medium text-sm">{preset.name}</span>
-                  <span className="text-zinc-500 text-xs">
-                    {preset.serverUrl ? "Remote API" : "Local WSL"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+      {/* Middle Column: Tools Directory */}
+      <div className="flex-1 flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden min-w-0">
+        <div className="p-4 border-b border-zinc-800 bg-zinc-950">
+           <h3 className="font-semibold text-zinc-100">
+             {selectedServer ? `Tools for ${selectedServer}` : 'Select a server'}
+           </h3>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 grid grid-cols-1 xl:grid-cols-2 gap-3 content-start">
+           {!selectedServer && (
+             <div className="col-span-full text-center text-zinc-500 py-10">Select a server to view its tools.</div>
+           )}
+           {selectedServer && serverTools.length === 0 && (
+             <div className="col-span-full text-center text-zinc-500 py-10">No tools found for this server.</div>
+           )}
+           {serverTools.map(t => (
+             <div 
+               key={t.name}
+               onClick={() => {
+                 setSelectedTool(t);
+                 setToolArgs(JSON.stringify(t.inputSchema?.properties || {}, null, 2));
+                 setToolResult('');
+               }}
+               className={`p-4 rounded border cursor-pointer transition-colors flex flex-col gap-2 ${selectedTool?.name === t.name ? 'bg-emerald-900/20 border-emerald-500/50' : 'bg-zinc-950 border-zinc-800 hover:border-zinc-700'}`}
+             >
+               <div className="font-mono text-sm text-emerald-400 font-semibold truncate">{t.name}</div>
+               <div className="text-xs text-zinc-400 line-clamp-3" title={t.description}>{t.description || 'No description provided.'}</div>
+               <div className="mt-auto text-xs text-zinc-600 font-mono pt-2 border-t border-zinc-800">
+                 {Object.keys(t.inputSchema?.properties || {}).length} parameters
+               </div>
+             </div>
+           ))}
+        </div>
+      </div>
 
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium text-zinc-200">Connected Servers</h3>
-            {servers.length === 0 ? (
-              <div className="p-6 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-500 text-center">
-                No bridge servers configured.
+      {/* Right Column: Sandbox */}
+      <div className="w-[420px] flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden shrink-0">
+        <div className="p-4 border-b border-zinc-800 bg-zinc-950 flex justify-between items-center">
+           <h3 className="font-semibold text-zinc-100 flex items-center gap-2">
+             <LucidePlay className="w-4 h-4 text-emerald-400" /> Tool Sandbox
+           </h3>
+        </div>
+        {selectedTool ? (
+          <div className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
+            <div className="flex-shrink-0">
+               <div className="font-mono text-sm text-emerald-400 mb-1 truncate">{selectedTool.name}</div>
+               <div className="text-xs text-zinc-400 line-clamp-3">{selectedTool.description}</div>
+            </div>
+            
+            <div className="flex flex-col gap-2 shrink-0">
+              <label className="text-xs text-zinc-400 font-medium">Arguments (JSON)</label>
+              <textarea 
+                value={toolArgs}
+                onChange={(e) => setToolArgs(e.target.value)}
+                className="w-full h-40 bg-zinc-950 border border-zinc-800 rounded p-2 text-zinc-200 font-mono text-xs focus:border-emerald-500 focus:outline-none resize-none custom-scrollbar"
+                spellCheck={false}
+              />
+            </div>
+            
+            <button 
+              onClick={handleExecuteTool}
+              disabled={executing}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-zinc-100 py-2 rounded font-medium flex items-center justify-center gap-2 transition-colors disabled:opacity-50 shrink-0"
+            >
+              {executing ? <LucideStopCircle className="w-4 h-4 animate-spin" /> : <LucidePlay className="w-4 h-4" />}
+              {executing ? 'Executing...' : 'Execute Tool'}
+            </button>
+
+            <div className="flex-1 flex flex-col gap-2 min-h-0">
+              <label className="text-xs text-zinc-400 font-medium">Output</label>
+              <div className="flex-1 bg-zinc-950 border border-zinc-800 rounded p-3 overflow-auto custom-scrollbar">
+                 <pre className="text-xs font-mono text-zinc-300 whitespace-pre-wrap break-words">
+                   {toolResult || 'No output yet.'}
+                 </pre>
               </div>
-            ) : (
-              servers.map(server => (
-                <div key={server.id} className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <input 
-                      type="text" 
-                      value={server.name}
-                      onChange={(e) => {
-                        const updated = servers.map(s => s.id === server.id ? { ...s, name: e.target.value } : s);
-                        setServers(updated);
-                      }}
-                      onBlur={() => handleSaveServers(servers)}
-                      className="bg-transparent border-none text-emerald-400 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded px-1"
-                    />
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => toggleServer(server.id)} className={`p-1.5 rounded ${server.enabled ? 'text-emerald-400 hover:bg-emerald-400/10' : 'text-zinc-500 hover:bg-zinc-800'}`}>
-                        {server.enabled ? <LucideStopCircle className="w-5 h-5" /> : <LucidePlay className="w-5 h-5" />}
-                      </button>
-                      <button onClick={() => removeServer(server.id)} className="p-1.5 text-rose-400 hover:bg-rose-400/10 rounded">
-                        <LucideTrash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div>
-                      <label className="text-xs text-zinc-500">Command</label>
-                      <input 
-                        type="text" 
-                        value={server.command || ''}
-                        onChange={(e) => {
-                          const updated = servers.map(s => s.id === server.id ? { ...s, command: e.target.value } : s);
-                          setServers(updated);
-                        }}
-                        onBlur={() => handleSaveServers(servers)}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-300 focus:border-emerald-500 focus:outline-none mt-1"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-zinc-500">Args (comma separated)</label>
-                      <input 
-                        type="text" 
-                        value={server.args?.join(', ') || ''}
-                        onChange={(e) => {
-                          const args = e.target.value.split(',').map(a => a.trim()).filter(Boolean);
-                          const updated = servers.map(s => s.id === server.id ? { ...s, args } : s);
-                          setServers(updated);
-                        }}
-                        onBlur={() => handleSaveServers(servers)}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-300 focus:border-emerald-500 focus:outline-none mt-1"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-zinc-500">Server URL (for Remote MCP)</label>
-                      <input 
-                        type="text" 
-                        value={server.serverUrl || ''}
-                        onChange={(e) => {
-                          const updated = servers.map(s => s.id === server.id ? { ...s, serverUrl: e.target.value } : s);
-                          setServers(updated);
-                        }}
-                        onBlur={() => handleSaveServers(servers)}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-sm text-zinc-300 focus:border-emerald-500 focus:outline-none mt-1"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <h3 className="text-lg font-medium text-zinc-200">Exposed Tools ({tools.length})</h3>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden flex flex-col max-h-[600px]">
-            <div className="overflow-y-auto p-4 space-y-3">
-              {tools.length === 0 ? (
-                <div className="text-zinc-500 text-center py-8">No tools available. Enable a server to load tools.</div>
-              ) : (
-                tools.map(tool => (
-                  <div key={tool.name} className="bg-zinc-950 border border-zinc-800 rounded p-3">
-                    <div className="text-emerald-400 font-medium font-mono text-sm mb-1">{tool.name}</div>
-                    <div className="text-zinc-400 text-sm mb-2">{tool.description}</div>
-                  </div>
-                ))
-              )}
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm p-8 text-center">
+            Select a tool from the middle column to execute it.
+          </div>
+        )}
       </div>
     </div>
   );

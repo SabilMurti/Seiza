@@ -83,12 +83,12 @@ export function SettingsTab() {
         {/* Model Roles */}
         <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-lg space-y-4">
           <h3 className="text-lg font-medium text-zinc-200">Agent Models</h3>
-          {['planner', 'coder', 'reviewer', 'scout'].map(role => (
+          {Object.keys(config.modelRoles || {}).map(role => (
             <div key={role}>
               <label className="block text-sm text-zinc-400 mb-1 capitalize">{role} Model</label>
               <input 
                 type="text"
-                value={config.modelRoles[role]}
+                value={config.modelRoles[role] || ''}
                 onChange={e => setConfig({...config, modelRoles: {...config.modelRoles, [role]: e.target.value}})}
                 placeholder="e.g. 9router/ag/gemini-3.1-pro"
                 className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-200 focus:border-emerald-500 focus:outline-none" 

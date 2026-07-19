@@ -51,7 +51,9 @@ export async function startServer(config: ServerConfig) {
             type: "object",
             properties: {
               prompt: { type: "string" },
-              dag: { type: "array", items: { type: "object" } }
+              model: { type: "string", description: "Optional model override e.g. '9router/ag/gemini-3.1-pro-low'" },
+              cwd: { type: "string", description: "Optional working directory" },
+              dag: { type: "array", items: { type: "object" }, description: "Optional pre-planned DAG" }
             },
             required: ["prompt"]
           }
@@ -64,7 +66,8 @@ export async function startServer(config: ServerConfig) {
             properties: {
               agentName: { type: "string" },
               prompt: { type: "string" },
-              modelOverride: { type: "string" }
+              model: { type: "string", description: "Optional model override" },
+              cwd: { type: "string", description: "Optional working directory" }
             },
             required: ["agentName", "prompt"]
           }
@@ -152,7 +155,7 @@ export async function startServer(config: ServerConfig) {
         }
       }
       
-      const runner = new DAGRunner(parsedTasks, agentsDir);
+      const runner = new DAGRunner(parsedTasks, agentsDir, args.model as string, args.cwd as string);
       activeTasks = runner.getTasks();
       
       const finalTasks = await runner.run();
@@ -169,7 +172,8 @@ export async function startServer(config: ServerConfig) {
     if (name === "run_single_agent") {
       const agentName = args.agentName as string;
       const prompt = args.prompt as string;
-      const modelOverride = args.modelOverride as string | undefined;
+      const modelOverride = args.model as string | undefined;
+      const cwdOverride = args.cwd as string | undefined;
 
       const agentsDir = path.join(__dirname, "..", "agents");
       const profilePath = path.join(agentsDir, `${agentName}.md`);
@@ -181,7 +185,7 @@ export async function startServer(config: ServerConfig) {
         profile.model = modelOverride;
       }
       const client = new NineRouterClient({ apiKey: process.env.OPENROUTER_API_KEY || '' });
-      const agent = new Agent(profile, client, bridgeManager);
+      const agent = new Agent(profile, client, bridgeManager, cwdOverride);
       const result = await agent.run(prompt);
       return {
         content: [{ type: "text", text: result }]
