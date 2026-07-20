@@ -4,15 +4,10 @@ import { BridgeTab } from './components/BridgeTab';
 import { Sidebar, type TabId } from './components/Sidebar';
 import { SkillsTab } from './components/SkillsTab';
 import { DirectivesTab } from './components/DirectivesTab';
+import { OverviewTab } from './components/OverviewTab';
+import { TasksTab } from './components/TasksTab';
 import { Header } from './components/Header';
-import { Network, Terminal } from 'lucide-react';
-interface LogEvent {
-  id: string;
-  timestamp: number;
-  type: 'info' | 'success' | 'warning' | 'error';
-  message: string;
-  agent: 'system' | 'planner' | 'coder' | 'reviewer';
-}
+
 function App() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -24,26 +19,16 @@ function App() {
     }, 4000);
   };
 
-  const [logs, setLogs] = useState<LogEvent[]>([]);
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
-    
-    const es = new EventSource('/api/events');
-    es.addEventListener('task_started', (e: MessageEvent) => {
-      const data = JSON.parse(e.data);
-      console.log('Task started:', data);
-    });
-
     fetch('/api/config')
       .then(res => res.json())
       .then(data => setConfig(data))
       .catch(err => console.error("Failed to load config", err));
-
-    return () => es.close();
   }, []);
 
-  const clearLogs = () => setLogs([]);
+  const clearLogs = () => {};
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleSearch = (_query: string) => {
     // no-op for now
@@ -68,34 +53,11 @@ function App() {
         {/* Scrollable Workspace */}
         <main className="flex-1 min-h-0 relative p-6 overflow-y-auto">
           {activeTab === 'overview' && (
-            <div className="h-full flex flex-col gap-6">
-               {/* Replace with OverviewView later */}
-               <div className="bg-[#121215] border border-[#27272a] rounded-lg p-6 flex-1 flex flex-col">
-                  <h2 className="text-xl font-bold font-mono text-zinc-100 flex items-center gap-2 mb-4">
-                    <Network className="w-5 h-5 text-emerald-400" />
-                    DAG Pipeline & Live Logs
-                  </h2>
-                  <div className="flex-1 bg-[#09090b] rounded border border-[#27272a] p-4 font-mono text-xs overflow-auto">
-                     {logs.map((log, i) => (
-                        <div key={i} className="py-1 border-b border-[#27272a]/50">
-                           <span className="text-zinc-500 mr-2">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                           <span className="text-emerald-400 mr-2">[{log.agent}]</span>
-                           <span className="text-zinc-300">{log.message}</span>
-                        </div>
-                     ))}
-                  </div>
-               </div>
-            </div>
+            <OverviewTab />
           )}
 
           {activeTab === 'tasks' && (
-            <div className="h-full flex flex-col">
-               <h2 className="text-xl font-bold font-mono text-zinc-100 mb-6 flex items-center gap-2">
-                 <Terminal className="w-5 h-5 text-emerald-400" />
-                 Tasks History
-               </h2>
-               {/* Replace with TasksView later */}
-            </div>
+            <TasksTab />
           )}
 
           {activeTab === 'bridge' && (

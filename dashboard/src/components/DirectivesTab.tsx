@@ -16,8 +16,15 @@ export function DirectivesTab() {
   const [activeAgent, setActiveAgent] = useState<AgentData | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [globalRules, setGlobalRules] = useState<string>('');
+  const [workspaceRules, setWorkspaceRules] = useState<string>('');
+  const [rulesActive, setRulesActive] = useState<boolean>(false);
+  const [rulesTab, setRulesTab] = useState<'global'|'workspace'>('global');
+  const [savingRules, setSavingRules] = useState(false);
+  const [savedRules, setSavedRules] = useState(false);
 
   useEffect(() => {
+    fetchRules();
     fetchAgents();
   }, []);
 
@@ -35,12 +42,48 @@ export function DirectivesTab() {
     }
   };
 
+  const fetchRules = async () => {
+    try {
+      const res = await fetch('/api/rules');
+      const data = await res.json();
+      setGlobalRules(data.globalRules || '');
+      setWorkspaceRules(data.workspaceRules || '');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+
   const handleTabClick = (name: string) => {
+    setRulesActive(false);
     const agent = agents.find(a => a.name === name);
     if (agent) {
       setActiveAgent(agent);
       setSaved(false);
     }
+  };
+
+  const handleRulesTabClick = () => {
+    setRulesActive(true);
+    setActiveAgent(null);
+  };
+
+  const handleSaveRules = async () => {
+    setSavingRules(true);
+    try {
+      const res = await fetch('/api/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ globalRules, workspaceRules })
+      });
+      if (res.ok) {
+        setSavedRules(true);
+        setTimeout(() => setSavedRules(false), 3000);
+      }
+    } catch(e) {
+      console.error(e);
+    }
+    setSavingRules(false);
   };
 
 
@@ -141,15 +184,79 @@ export function DirectivesTab() {
             <span className="capitalize">{agent.name}</span>
           </button>
         ))}
+        <button
+          onClick={handleRulesTabClick}
+          className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${
+            rulesActive
+              ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10'
+              : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+          }`}
+        >
+          <FileCode className="w-4 h-4" />
+          <span>System &amp; Project Rules</span>
+        </button>
       </div>
       <div className="p-2 border-b border-[#27272a] bg-[#09090b]">
          <button onClick={handleAddAgent} className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors">
             + Add New Agent
          </button>
       </div>
-
-      {/* Editor Area */}
       <div className="flex-1 flex flex-col min-h-0 relative">
+        {rulesActive ? (
+          <div className="flex flex-col h-full bg-[#09090b]">
+            <div className="flex items-center justify-between p-4 border-b border-[#27272a]">
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setRulesTab('global')}
+                  className={`px-3 py-1.5 text-sm rounded ${rulesTab === 'global' ? 'bg-emerald-500/20 text-emerald-400' : 'text-zinc-400 hover:text-zinc-200'}`}
+                >
+                  Global Rules (~/.seiza/RULES.md)
+                </button>
+                <button
+                  onClick={() => setRulesTab('workspace')}
+                  className={`px-3 py-1.5 text-sm rounded ${rulesTab === 'workspace' ? 'bg-emerald-500/20 text-emerald-400' : 'text-zinc-400 hover:text-zinc-200'}`}
+                >
+                  Workspace Rules (AGENTS.md / RULES.md)
+                </button>
+              </div>
+              <button
+                onClick={handleSaveRules}
+                disabled={savingRules}
+                className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded transition-all duration-300 ${
+                  savedRules 
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 border border-emerald-500/50'
+                }`}
+              >
+                {savedRules ? (
+                  <><CheckCircle2 className="w-4 h-4" /> Saved</>
+                ) : (
+                  <><LucideSave className="w-4 h-4" /> {savingRules ? 'Saving...' : 'Save Rules'}</>
+                )}
+              </button>
+            </div>
+            <div className="flex-1 p-4">
+              {rulesTab === 'global' ? (
+                <textarea
+                  value={globalRules}
+                  onChange={(e) => setGlobalRules(e.target.value)}
+                  className="w-full h-full bg-[#121215] text-zinc-300 p-4 font-mono text-sm resize-none focus:outline-none border border-[#27272a] rounded shadow-inner"
+                  spellCheck={false}
+                  placeholder="# Global Rules\n\nAdd cross-project rules here..."
+                />
+              ) : (
+                <textarea
+                  value={workspaceRules}
+                  onChange={(e) => setWorkspaceRules(e.target.value)}
+                  className="w-full h-full bg-[#121215] text-zinc-300 p-4 font-mono text-sm resize-none focus:outline-none border border-[#27272a] rounded shadow-inner"
+                  spellCheck={false}
+                  placeholder="# Workspace Rules\n\nAdd project-specific rules here..."
+                />
+              )}
+            </div>
+          </div>
+        ) : (
+        <>
         {/* Header bar for agent */}
         {activeAgent && (
           <div className="flex flex-col p-4 border-b border-[#27272a] bg-[#09090b] gap-3">
@@ -233,6 +340,8 @@ export function DirectivesTab() {
              {saving ? 'Saving...' : 'Save Directive & Model'}
            </button>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

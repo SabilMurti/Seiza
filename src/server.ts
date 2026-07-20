@@ -17,6 +17,7 @@ import { Agent } from "./core/agent.js";
 import { hitlManager } from "./core/hitl.js";
 
 let activeTasks: Task[] = [];
+import { RuleManager } from "./core/rules.js";
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 
@@ -418,6 +419,24 @@ export async function startServer(config: ServerConfig) {
 
     app.get("/api/tasks", (req, res) => {
       res.json({ tasks: activeTasks });
+    });
+
+    app.get("/api/rules", (req, res) => {
+      res.json({
+        globalRules: RuleManager.getGlobalRules(),
+        workspaceRules: RuleManager.getWorkspaceRules()
+      });
+    });
+
+    app.post("/api/rules", (req, res) => {
+      const { globalRules, workspaceRules } = req.body;
+      if (globalRules !== undefined) {
+        RuleManager.setGlobalRules(globalRules);
+      }
+      if (workspaceRules !== undefined) {
+        RuleManager.setWorkspaceRules(workspaceRules);
+      }
+      res.json({ success: true });
     });
 
     app.get("/api/agents", (req, res) => {

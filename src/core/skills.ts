@@ -69,10 +69,18 @@ export class SkillManager {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        const skillPath = path.join(dirPath, entry.name, 'SKILL.md');
+        const itemPath = path.join(dirPath, entry.name);
+        const skillPath = path.join(itemPath, 'SKILL.md');
         const skill = this.parseSkillMd(skillPath, isGlobal);
         if (skill) {
           skills.push(skill);
+        }
+
+        // Support skill bundles (e.g. taste-skill/skills/*)
+        const subSkillsDir = path.join(itemPath, 'skills');
+        if (fs.existsSync(subSkillsDir) && fs.statSync(subSkillsDir).isDirectory()) {
+          const nested = this.discoverSkillsInDir(subSkillsDir, isGlobal);
+          skills.push(...nested);
         }
       }
     }
