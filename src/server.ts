@@ -35,6 +35,10 @@ export async function startServer(config: ServerConfig) {
   const bridgeManager = new MCPBridgeManager(configManager);
   await bridgeManager.initializeAll();
   const skillManager = new SkillManager(process.cwd());
+  const nineRouterClient = new NineRouterClient({
+    baseUrl: configManager.getConfig().nineRouter?.baseUrl,
+    apiKey: configManager.getConfig().nineRouter?.apiKey
+  });
   const mcpServer = new Server({
     name: "seiza",
     version: "0.1.0"
@@ -265,12 +269,7 @@ export async function startServer(config: ServerConfig) {
     }
 
     if (name === "list_seiza_models") {
-       const models = [
-          "9router/ag/gemini-3.1-pro-low",
-          "9router/ag/gemini-3.1-flash-lite",
-          "9router/ag/gemini-3-flash",
-          "9router/ag/claude-sonnet-4-6"
-       ];
+       const models = await nineRouterClient.listModels();
        return {
          content: [{
            type: "text",
@@ -531,6 +530,15 @@ ${systemPrompt || ''}`;
       } catch (e) {
         console.error("Error deleting agent:", e);
         res.status(500).json({ success: false, error: String(e) });
+      }
+    });
+
+    app.get("/api/models", async (req, res) => {
+      try {
+        const models = await nineRouterClient.listModels();
+        res.json({ models });
+      } catch (e) {
+        res.status(500).json({ error: String(e) });
       }
     });
 

@@ -22,11 +22,25 @@ export function DirectivesTab() {
   const [rulesTab, setRulesTab] = useState<'global'|'workspace'>('global');
   const [savingRules, setSavingRules] = useState(false);
   const [savedRules, setSavedRules] = useState(false);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
 
   useEffect(() => {
     fetchRules();
     fetchAgents();
+    fetchModels();
   }, []);
+
+  const fetchModels = async () => {
+    try {
+      const res = await fetch('/api/models');
+      const data = await res.json();
+      if (Array.isArray(data.models)) {
+        setAvailableModels(data.models);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
 
   const fetchAgents = async () => {
@@ -276,14 +290,20 @@ export function DirectivesTab() {
                 <label className="text-xs text-zinc-500 font-mono">Model</label>
                 <input
                   type="text"
+                  list="available-models"
                   value={activeAgent.model}
                   onChange={e => {
                     setActiveAgent({ ...activeAgent, model: e.target.value });
                     setSaved(false);
                   }}
-                  placeholder="e.g. 9router/ag/gemini-3.1-pro-low"
+                  placeholder="Select or type model name e.g. ag/gemini-3.1-pro-low"
                   className="bg-[#121215] border border-[#27272a] rounded px-3 py-1.5 text-sm font-mono text-zinc-200 focus:border-emerald-400 focus:outline-none"
                 />
+                <datalist id="available-models">
+                  {availableModels.map(m => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-zinc-500 font-mono">Description</label>

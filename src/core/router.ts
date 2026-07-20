@@ -47,8 +47,28 @@ export class NineRouterClient {
       : (process.env.NINE_ROUTER_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || "free");
   }
 
-  public getTotalTokensUsed(): number {
-    return this.totalTokensUsed;
+  public async listModels(): Promise<string[]> {
+    try {
+      const res = await fetch(`${this.baseUrl}/models`, {
+        headers: { "Authorization": `Bearer ${this.apiKey}` }
+      });
+      if (res.ok) {
+        const data = await res.json() as { data: Array<{ id: string }> };
+        if (Array.isArray(data?.data)) {
+          return data.data.map(m => m.id);
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to fetch models from 9router daemon: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return [
+      "ag/gemini-3-flash",
+      "ag/gemini-3.1-pro-low",
+      "ag/gemini-3.1-flash-lite",
+      "ag/claude-sonnet-4-6",
+      "bm/qwen2.5",
+      "bm/gpt-4o"
+    ];
   }
 
   public async createChatCompletion(request: ChatCompletionRequest): Promise<string> {
@@ -60,9 +80,15 @@ export class NineRouterClient {
 
     const isStreaming = request.stream === true;
     
-    // Fallback model if not provided
-    if (!request.model) {
-      request.model = "9router/ag/gemini-3.1-flash-lite";
+    // Dynamic fallback model if not provided
+    if (!request.model || request.model.trim().length === 0) {
+      const available = await this.listModels();
+      request.model = available[0] || "ag/gemini-3-flash";
+    }
+
+    // Clean model name for 9Router daemon (strip 9router/ prefix if present)
+    if (request.model.startsWith("9router/")) {
+      request.model = request.model.slice(8);
     }
 
     if (isStreaming) {
