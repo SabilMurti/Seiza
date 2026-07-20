@@ -202,11 +202,41 @@ export async function startServer(config: ServerConfig) {
            task.prompt += injectedSkillsContext;
          });
       }
+      const port = config.port || 3456;
+      const onTaskEvent = async (data: any) => {
+        try {
+          await fetch(`http://localhost:${port}/api/tasks/sync`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tasks: [data.task] })
+          });
+        } catch {}
+      };
+
+      eventBroker.on('task_started', onTaskEvent);
+      eventBroker.on('task_completed', onTaskEvent);
+      eventBroker.on('task_failed', onTaskEvent);
 
       const runner = new DAGRunner(parsedTasks, agentsDir, args.model as string, args.cwd as string, bridgeManager);
       activeTasks = runner.getTasks();
       
-      const finalTasks = await runner.run();
+      // Sync initial state of all tasks
+      try {
+        await fetch(`http://localhost:${port}/api/tasks/sync`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tasks: activeTasks })
+        });
+      } catch {}
+
+      let finalTasks: Task[];
+      try {
+        finalTasks = await runner.run();
+      } finally {
+        eventBroker.off('task_started', onTaskEvent);
+        eventBroker.off('task_completed', onTaskEvent);
+        eventBroker.off('task_failed', onTaskEvent);
+      }
       activeTasks = finalTasks;
 
       return {
@@ -252,12 +282,48 @@ export async function startServer(config: ServerConfig) {
          profile.systemPrompt += injectedSkillsContext;
       }
 
+      const port = config.port || 3456;
+      const dummyTask: Task = {
+        id: `single-${Date.now()}`,
+        agent: agentName as any,
+        prompt: prompt,
+        dependencies: [],
+        status: 'running'
+      };
+
+      try {
+        await fetch(`http://localhost:${port}/api/tasks/sync`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tasks: [dummyTask] })
+        });
+      } catch {}
+
       const agent = new Agent(profile, client, bridgeManager, cwdOverride);
-      const result = await agent.run(prompt);
+      let result: string;
+      try {
+        result = await agent.run(prompt);
+        dummyTask.status = 'completed';
+        dummyTask.result = result;
+      } catch (err) {
+        dummyTask.status = 'failed';
+        dummyTask.error = String(err);
+        throw err;
+      } finally {
+        try {
+          await fetch(`http://localhost:${port}/api/tasks/sync`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tasks: [dummyTask] })
+          });
+        } catch {}
+      }
+
       return {
         content: [{ type: "text", text: result }]
       };
     }
+
 
     if (name === "list_seiza_agents") {
       const agentsDir = path.join(__dirname, "..", "agents");
@@ -434,6 +500,27 @@ export async function startServer(config: ServerConfig) {
       res.json({ tasks: activeTasks });
     });
 
+    app.post("/api/tasks/sync", (req, res) => {
+      const { tasks } = req.body;
+      if (Array.isArray(tasks)) {
+        for (const incomingTask of tasks) {
+          const idx = activeTasks.findIndex(t => t.id === incomingTask.id);
+          if (idx !== -1) {
+            activeTasks[idx] = incomingTask;
+          } else {
+            activeTasks.push(incomingTask);
+          }
+          if (incomingTask.status === 'running') {
+            eventBroker.emit('task_started', { task: incomingTask });
+          } else if (incomingTask.status === 'completed') {
+            eventBroker.emit('task_completed', { task: incomingTask });
+          } else if (incomingTask.status === 'failed') {
+            eventBroker.emit('task_failed', { task: incomingTask });
+          }
+        }
+      }
+      res.json({ success: true });
+    });
     app.get("/api/rules", (req, res) => {
       res.json({
         globalRules: RuleManager.getGlobalRules(),
