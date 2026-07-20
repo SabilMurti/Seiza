@@ -17,13 +17,15 @@ program
   .description('Seiza MCP Server and Dashboard')
   .version('0.1.0')
   .option('--data-dir <path>', 'custom data directory', path.join(os.homedir(), '.seiza'))
-  .option('--http', 'enable HTTP/SSE server mode', false)
+  .option('--http', 'enable HTTP/SSE server mode', true)
+  .option('--no-dashboard', 'disable HTTP Web Dashboard server')
   .option('-p, --port <number>', 'port number', (val) => parseInt(val, 10), 3456)
   .option('-d, --daemon', 'run server in background daemon mode', false);
 
 program.parse(process.argv);
 
 const options = program.opts();
+const isHttpEnabled = options.dashboard !== false && options.http !== false;
 
 async function main() {
   const dataDir = options.dataDir;
@@ -33,8 +35,8 @@ async function main() {
   }
 
   if (options.daemon) {
-    if (!options.http) {
-      console.error('Error: Daemon mode requires --http to be enabled.');
+    if (!isHttpEnabled) {
+      console.error('Error: Daemon mode requires dashboard to be enabled.');
       process.exit(1);
     }
     
@@ -61,7 +63,7 @@ async function main() {
   } else {
     await startServer({
       dataDir: options.dataDir,
-      http: options.http,
+      http: isHttpEnabled,
       port: options.port
     });
   }
@@ -71,6 +73,6 @@ main().catch((err) => {
   console.error('Failed to start Seiza:', err);
   process.exit(1);
 });
-export * from "./core/router";
-export * from "./core/agent";
-export * from "./tools/index";
+export * from "./core/router.js";
+export * from "./core/agent.js";
+export * from "./tools/index.js";

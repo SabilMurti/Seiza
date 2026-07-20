@@ -188,8 +188,10 @@ export async function startServer(config: ServerConfig) {
          });
       }
       
-      if (injectedSkillsContext && profile) {
-         profile.systemPrompt += injectedSkillsContext;
+      if (injectedSkillsContext && parsedTasks.length > 0) {
+         parsedTasks.forEach((task: any) => {
+           task.prompt += injectedSkillsContext;
+         });
       }
 
       const runner = new DAGRunner(parsedTasks, agentsDir, args.model as string, args.cwd as string);
@@ -595,14 +597,25 @@ ${systemPrompt || ''}`;
       console.warn(`Warning: Dashboard dist not found at ${dashboardPath}`);
     }
 
-    app.listen(config.port, () => {
-      console.log(`Seiza HTTP server running on port ${config.port}`);
-      console.log(`Data directory: ${config.dataDir}`);
-      console.log(`SSE Endpoint: http://localhost:${config.port}/messages`);
+    const server = app.listen(config.port, () => {
+      console.error(`Seiza HTTP Dashboard running on port ${config.port}`);
+      console.error(`Data directory: ${config.dataDir}`);
+      console.error(`SSE Endpoint: http://localhost:${config.port}/messages`);
     });
-  } else {
+
+    server.on('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`Port ${config.port} is already in use by another active Seiza instance.`);
+      } else {
+        console.error(`Express server error: ${err.message}`);
+      }
+    });
+  }
+
+  // Always connect StdioServerTransport if not running in standalone daemon mode
+  if (!process.argv.includes('--daemon')) {
     const transport = new StdioServerTransport();
     await mcpServer.connect(transport);
-    console.error("Seiza MCP Server running on stdio"); // Using stderr for logs in stdio mode
+    console.error("Seiza MCP Server running on stdio");
   }
 }
