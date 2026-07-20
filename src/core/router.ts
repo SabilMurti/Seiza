@@ -61,14 +61,7 @@ export class NineRouterClient {
     } catch (err) {
       console.error(`Failed to fetch models from 9router daemon: ${err instanceof Error ? err.message : String(err)}`);
     }
-    return [
-      "ag/gemini-3-flash",
-      "ag/gemini-3.1-pro-low",
-      "ag/gemini-3.1-flash-lite",
-      "ag/claude-sonnet-4-6",
-      "bm/qwen2.5",
-      "bm/gpt-4o"
-    ];
+    return [];
   }
 
   public async createChatCompletion(request: ChatCompletionRequest): Promise<string> {
