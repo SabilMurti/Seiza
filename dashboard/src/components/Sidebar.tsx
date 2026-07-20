@@ -1,7 +1,7 @@
 import React from 'react';
-import { Network, Terminal, ToyBrick, FileCode, Settings, Sparkles } from 'lucide-react';
+import { Network, Terminal, ToyBrick, FileCode, Settings, Sparkles, Zap } from 'lucide-react';
 
-export type TabId = 'overview' | 'tasks' | 'bridge' | 'directives' | 'settings';
+export type TabId = 'overview' | 'tasks' | 'bridge' | 'directives' | 'skills' | 'settings';
 
 interface SidebarProps {
   activeTab: TabId;
@@ -14,6 +14,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     { id: 'tasks' as const, label: 'Tasks', icon: Terminal },
     { id: 'bridge' as const, label: 'Bridge Manager', icon: ToyBrick },
     { id: 'directives' as const, label: 'Directives', icon: FileCode },
+    { id: 'skills' as const, label: 'Skills Hub', icon: Zap },
     { id: 'settings' as const, label: 'Settings', icon: Settings },
   ];
 

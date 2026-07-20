@@ -1,4 +1,5 @@
 import { ConfigManager, Config } from "./config.js";
+import { SkillManager } from "./core/skills.js";
 import { MCPBridgeManager } from "./core/bridge.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -32,6 +33,7 @@ export async function startServer(config: ServerConfig) {
   const configManager = new ConfigManager(config.dataDir);
   const bridgeManager = new MCPBridgeManager(configManager);
   await bridgeManager.initializeAll();
+  const skillManager = new SkillManager(process.cwd());
   const mcpServer = new Server({
     name: "seiza",
     version: "0.1.0"
@@ -53,7 +55,8 @@ export async function startServer(config: ServerConfig) {
               prompt: { type: "string" },
               model: { type: "string", description: "Optional model override e.g. '9router/ag/gemini-3.1-pro-low'" },
               cwd: { type: "string", description: "Optional working directory" },
-              dag: { type: "array", items: { type: "object" }, description: "Optional pre-planned DAG" }
+              dag: { type: "array", items: { type: "object" }, description: "Optional pre-planned DAG" },
+              skills: { type: "array", items: { type: "string" }, description: "Optional list of skill names to inject into the context" }
             },
             required: ["prompt"]
           }
@@ -67,7 +70,8 @@ export async function startServer(config: ServerConfig) {
               agentName: { type: "string" },
               prompt: { type: "string" },
               model: { type: "string", description: "Optional model override" },
-              cwd: { type: "string", description: "Optional working directory" }
+              cwd: { type: "string", description: "Optional working directory" },
+              skills: { type: "array", items: { type: "string" }, description: "Optional list of skill names to inject into the context" }
             },
             required: ["agentName", "prompt"]
           }
@@ -114,6 +118,22 @@ export async function startServer(config: ServerConfig) {
             },
             required: ["serverName", "toolName", "arguments"]
           }
+        },
+        {
+          name: "list_seiza_skills",
+          description: "Returns list of all installed skills",
+          inputSchema: { type: "object", properties: {} }
+        },
+        {
+          name: "install_seiza_skill",
+          description: "Installs a skill from GitHub or local path",
+          inputSchema: {
+            type: "object",
+            properties: {
+              source: { type: "string", description: "github:owner/repo, owner/repo, full git URL, or local path" }
+            },
+            required: ["source"]
+          }
         }
       ]
     };
@@ -155,6 +175,22 @@ export async function startServer(config: ServerConfig) {
         }
       }
       
+      // If skills are requested, pull them and append to planner's system prompt or global context
+      let injectedSkillsContext = "";
+      if (Array.isArray(args.skills)) {
+         const skillsArr = args.skills as string[];
+         skillsArr.forEach(skillName => {
+           const ins = skillManager.getSkillInstructions(skillName);
+           if (ins) {
+             injectedSkillsContext += `\n\n--- SKILL: ${skillName} ---\n${ins}`;
+           }
+         });
+      }
+      
+      if (injectedSkillsContext && profile) {
+         profile.systemPrompt += injectedSkillsContext;
+      }
+
       const runner = new DAGRunner(parsedTasks, agentsDir, args.model as string, args.cwd as string);
       activeTasks = runner.getTasks();
       
@@ -189,6 +225,21 @@ export async function startServer(config: ServerConfig) {
         apiKey: cfg.nineRouter.apiKey,
         baseUrl: cfg.nineRouter.baseUrl
       });
+      // Inject skills if provided
+      let injectedSkillsContext = "";
+      if (Array.isArray(args.skills)) {
+         const skillsArr = args.skills as string[];
+         skillsArr.forEach(skillName => {
+           const ins = skillManager.getSkillInstructions(skillName);
+           if (ins) {
+             injectedSkillsContext += `\n\n--- SKILL: ${skillName} ---\n${ins}`;
+           }
+         });
+      }
+      if (injectedSkillsContext) {
+         profile.systemPrompt += injectedSkillsContext;
+      }
+
       const agent = new Agent(profile, client, bridgeManager, cwdOverride);
       const result = await agent.run(prompt);
       return {
@@ -259,6 +310,24 @@ export async function startServer(config: ServerConfig) {
        return {
          content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
        };
+    }
+
+    if (name === "list_seiza_skills") {
+      return {
+        content: [{ type: "text", text: JSON.stringify(skillManager.listSkills(), null, 2) }]
+      };
+    }
+
+    if (name === "install_seiza_skill") {
+      const source = args.source as string;
+      try {
+        skillManager.installSkill(source);
+        return {
+          content: [{ type: "text", text: `Successfully installed skill from ${source}` }]
+        };
+      } catch (e) {
+        throw new Error(`Failed to install skill from ${source}: ${String(e)}`);
+      }
     }
     throw new Error(`Unknown tool: ${name}`);
   });
@@ -447,6 +516,42 @@ ${systemPrompt || ''}`;
     app.post("/api/tasks/clear", (req, res) => {
       activeTasks = [];
       res.json({ success: true });
+    });
+
+    app.get("/api/skills", (req, res) => {
+      res.json({ skills: skillManager.listSkills() });
+    });
+
+    app.post("/api/skills/install", (req, res) => {
+      const { source } = req.body;
+      if (!source) {
+        return res.status(400).json({ error: "Source is required" });
+      }
+      try {
+        skillManager.installSkill(source);
+        res.json({ success: true, message: `Installed skill from ${source}` });
+      } catch (e) {
+        res.status(500).json({ error: String(e) });
+      }
+    });
+
+    app.delete("/api/skills/:name", (req, res) => {
+      try {
+        skillManager.deleteSkill(req.params.name);
+        res.json({ success: true });
+      } catch (e) {
+        res.status(500).json({ error: String(e) });
+      }
+    });
+
+    app.get("/api/skills/:name", (req, res) => {
+      const skills = skillManager.listSkills();
+      const skill = skills.find(s => s.name === req.params.name);
+      if (skill) {
+        res.json({ skill });
+      } else {
+        res.status(404).json({ error: "Skill not found" });
+      }
     });
 
     app.get("/api/config", (req, res) => {

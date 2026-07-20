@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { SettingsTab } from './components/SettingsTab';
 import { BridgeTab } from './components/BridgeTab';
 import { Sidebar, type TabId } from './components/Sidebar';
+import { SkillsTab } from './components/SkillsTab';
 import { DirectivesTab } from './components/DirectivesTab';
 import { Header } from './components/Header';
 import { Network, Terminal } from 'lucide-react';
@@ -99,6 +100,9 @@ function App() {
 
           {activeTab === 'bridge' && (
             <BridgeTab />
+          )}
+          {activeTab === 'skills' && (
+            <SkillsTab />
           )}
 
           {activeTab === 'directives' && (

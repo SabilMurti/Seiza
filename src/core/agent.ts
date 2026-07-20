@@ -1,8 +1,8 @@
 import { MCPBridgeManager } from "./bridge.js";
 import * as fs from "fs";
 import * as path from "path";
-import { NineRouterClient, ChatMessage } from "./router";
-import { NativeToolsEngine } from "../tools/index";
+import { NineRouterClient, ChatMessage } from "./router.js";
+import { NativeToolsEngine } from "../tools/index.js";
 
 export interface AgentProfile {
   name: string;
@@ -153,7 +153,7 @@ export class Agent {
     
     while (iteration < maxIterations) {
       iteration++;
-      console.log(`\n--- Agent ${this.profile.name} Iteration ${iteration} ---`);
+      console.error(`\n--- Agent ${this.profile.name} Iteration ${iteration} ---`);
       
       const response = await this.client.createChatCompletion({
         model: this.profile.model,
@@ -167,7 +167,7 @@ export class Agent {
       });
       
       if (response.includes("<finish>")) {
-        console.log(`\nAgent ${this.profile.name} finished successfully.`);
+        console.error(`\nAgent ${this.profile.name} finished successfully.`);
         return response;
       }
 
@@ -180,7 +180,7 @@ export class Agent {
         try {
           const args = JSON.parse(argsStr.trim());
           if (this.bridgeManager) {
-            console.log(`Executing MCP call: ${server}.${tool}`);
+            console.error(`Executing MCP call: ${server}.${tool}`);
             const res = await this.bridgeManager.callTool(server, tool, args);
             mcpResults.push(`MCP call ${server}.${tool} result:\n${JSON.stringify(res, null, 2)}`);
           } else {

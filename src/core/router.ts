@@ -65,23 +65,65 @@ export class NineRouterClient {
       request.model = "9router/ag/gemini-3.1-flash-lite";
     }
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(request),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`9Router API error (${response.status}): ${errorText}`);
-    }
-
     if (isStreaming) {
-      if (!response.body) {
-         throw new Error("Response body is null, cannot stream");
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(request),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`9Router API error (${response.status}): ${errorText}`);
+        }
+
+        if (!response.body) {
+          throw new Error("Response body is null, cannot stream");
+        }
+        return await this.handleStream(response.body);
+      } catch (err) {
+        console.error(`Streaming failed, falling back to non-streaming: ${err instanceof Error ? err.message : String(err)}`);
+        
+        // Retry with stream: false
+        const fallbackRequest = { ...request, stream: false };
+        const response = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(fallbackRequest),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`9Router API error (${response.status}): ${errorText}`);
+        }
+
+        const data = await response.json() as { 
+          choices: Array<{ message: { content: string } }>;
+          usage?: { total_tokens: number };
+        };
+        
+        if (data.usage?.total_tokens) {
+          this.totalTokensUsed += data.usage.total_tokens;
+        } else {
+          const estimated = JSON.stringify(fallbackRequest.messages).length / 4 + (data.choices[0]?.message?.content?.length || 0) / 4;
+          this.totalTokensUsed += Math.ceil(estimated);
+        }
+        
+        return data.choices[0]?.message?.content || "";
       }
-      return this.handleStream(response.body);
     } else {
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`9Router API error (${response.status}): ${errorText}`);
+      }
+
       const data = await response.json() as { 
         choices: Array<{ message: { content: string } }>;
         usage?: { total_tokens: number };
@@ -90,7 +132,6 @@ export class NineRouterClient {
       if (data.usage?.total_tokens) {
         this.totalTokensUsed += data.usage.total_tokens;
       } else {
-        // Estimate tokens
         const estimated = JSON.stringify(request.messages).length / 4 + (data.choices[0]?.message?.content?.length || 0) / 4;
         this.totalTokensUsed += Math.ceil(estimated);
       }

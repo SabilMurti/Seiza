@@ -47,21 +47,22 @@ export const RECOMMENDED_BRIDGES = [
   {
     id: "amneshia",
     name: "amneshia",
-    command: "wsl.exe",
-    args: ["-e", "env", "PATH=/home/murtix/.local/share/fnm/node-versions/v24.18.0/installation/bin:/usr/bin:/bin", "/home/murtix/.local/share/fnm/node-versions/v24.18.0/installation/bin/amneshia"],
+    command: "/home/murtix/.local/share/fnm/node-versions/v24.18.0/installation/bin/amneshia",
+    args: [],
     enabled: true
   },
   {
     id: "codebase-memory-mcp",
     name: "codebase-memory-mcp",
-    command: "wsl.exe",
-    args: ["-e", "/home/murtix/.local/bin/codebase-memory-mcp"],
+    command: "/home/murtix/.local/bin/codebase-memory-mcp",
+    args: [],
     enabled: true
   },
   {
     id: "context7",
     name: "context7",
-    serverUrl: "https://mcp.context7.com/mcp",
+    command: "npx",
+    args: ["-y", "@context7/mcp-server"],
     enabled: true
   }
 ];
