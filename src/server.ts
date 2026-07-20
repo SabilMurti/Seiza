@@ -172,8 +172,13 @@ export async function startServer(config: ServerConfig) {
         const planner = new Agent(profile, client, bridgeManager);
         const plannerResult = await planner.run(prompt);
         try {
-            const match = plannerResult.match(/```json\n([\s\S]*?)\n```/);
-            const jsonString = match ? match[1] : plannerResult;
+            let cleaned = plannerResult.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
+            const firstBracket = cleaned.indexOf('[');
+            const lastBracket = cleaned.lastIndexOf(']');
+            let jsonString = cleaned;
+            if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+              jsonString = cleaned.substring(firstBracket, lastBracket + 1);
+            }
             parsedTasks = JSON.parse(jsonString) as Task[];
         } catch (e) {
             throw new Error("Failed to parse Planner output as JSON DAG: " + String(e) + "\nOutput was: " + plannerResult);
