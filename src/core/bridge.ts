@@ -66,12 +66,27 @@ export class MCPBridgeManager {
 
   public async callTool(serverName: string, toolName: string, args: unknown) {
     const serverConfig = this.configManager.getConfig().bridgeServers.find(s => s.name === serverName || s.id === serverName);
-    if (!serverConfig) throw new Error(`Server ${serverName} not found`);
+    if (!serverConfig) throw new Error(`Bridge server '${serverName}' is not configured.`);
 
-    const client = this.clients.get(serverConfig.id);
-    if (!client) throw new Error(`Client for ${serverName} not connected`);
+    let client = this.clients.get(serverConfig.id);
+    if (!client) {
+      console.error(`Client for ${serverName} not connected. Attempting auto-reconnect...`);
+      await this.connectServer(serverConfig);
+      client = this.clients.get(serverConfig.id);
+    }
 
-    return await client.callTool({ name: toolName, arguments: args as Record<string, unknown> });
+    if (!client) throw new Error(`Client for bridge server '${serverName}' could not connect.`);
+
+    try {
+      return await client.callTool({ name: toolName, arguments: args as Record<string, unknown> });
+    } catch (err) {
+      console.error(`Error executing bridge tool '${toolName}' on '${serverName}'. Reconnecting client...`, err);
+      this.clients.delete(serverConfig.id);
+      await this.connectServer(serverConfig);
+      const reconnectedClient = this.clients.get(serverConfig.id);
+      if (!reconnectedClient) throw err;
+      return await reconnectedClient.callTool({ name: toolName, arguments: args as Record<string, unknown> });
+    }
   }
 
   public listAllTools() {

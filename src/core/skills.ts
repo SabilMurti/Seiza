@@ -147,11 +147,18 @@ export class SkillManager {
   }
 
   public deleteSkill(name: string): void {
-    const targetDir = path.join(this.globalSkillsDir, name);
+    const safeName = path.basename(name);
+    if (!safeName || safeName === '.' || safeName === '..' || !/^[a-zA-Z0-9_.-]+$/.test(safeName)) {
+      throw new Error("Invalid skill name format");
+    }
+    const targetDir = path.join(this.globalSkillsDir, safeName);
+    if (!targetDir.startsWith(this.globalSkillsDir)) {
+      throw new Error("Invalid skill path traversal attempt");
+    }
     if (fs.existsSync(targetDir)) {
       fs.rmSync(targetDir, { recursive: true, force: true });
     } else {
-      throw new Error(`Skill ${name} not found in global skills dir`);
+      throw new Error(`Skill ${safeName} not found in global skills dir`);
     }
   }
 

@@ -24,11 +24,13 @@ export class DAGRunner {
   private agentsDir: string;
   private modelOverride?: string;
   private cwdOverride?: string;
+  private bridgeManager?: any;
 
-  constructor(tasks: Task[], agentsDir: string, modelOverride?: string, cwdOverride?: string) {
+  constructor(tasks: Task[], agentsDir: string, modelOverride?: string, cwdOverride?: string, bridgeManager?: any) {
     this.agentsDir = agentsDir;
     this.modelOverride = modelOverride;
     this.cwdOverride = cwdOverride;
+    this.bridgeManager = bridgeManager;
     for (const task of tasks) {
       if (this.tasks.has(task.id)) {
         throw new Error(`Duplicate task ID: ${task.id}`);
@@ -147,21 +149,18 @@ export class DAGRunner {
       }
 
       const profilePath = path.join(this.agentsDir, `${task.agent}.md`);
-      const profileContent = fs.readFileSync(profilePath, 'utf8');
-      
-      const parts = profileContent.split('---');
       let profile: AgentProfile;
-      if (parts.length >= 3) {
-          profile = JSON.parse(parts[1]) as AgentProfile;
-          profile.systemPrompt = parts.slice(2).join('---').trim();
+      if (fs.existsSync(profilePath)) {
+        profile = Agent.loadFromFile(profilePath);
       } else {
-          profile = { name: task.agent, model: "auto", tools: [], systemPrompt: profileContent };
+        profile = { name: task.agent, model: "auto", tools: [], systemPrompt: `You are a ${task.agent} agent.` };
       }
+
       const client = new NineRouterClient({ apiKey: process.env.OPENROUTER_API_KEY || '' });
       if (this.modelOverride) {
         profile.model = this.modelOverride;
       }
-      const agent = new Agent(profile, client, undefined, this.cwdOverride);
+      const agent = new Agent(profile, client, this.bridgeManager, this.cwdOverride);
       
       // If the task is a coder task, we might want to run consensus
       let result = await agent.run(task.prompt);
@@ -169,21 +168,16 @@ export class DAGRunner {
       if (task.agent === 'coder') {
         // Setup reviewer
         const reviewerProfilePath = path.join(this.agentsDir, `reviewer.md`);
-        let reviewerProfile: AgentProfile = { name: "reviewer", model: "auto", tools: [], systemPrompt: "Reviewer profile missing" };
+        let reviewerProfile: AgentProfile;
         if (fs.existsSync(reviewerProfilePath)) {
-           const revContent = fs.readFileSync(reviewerProfilePath, 'utf8');
-           const revParts = revContent.split('---');
-           if (revParts.length >= 3) {
-               reviewerProfile = JSON.parse(revParts[1]) as AgentProfile;
-               reviewerProfile.systemPrompt = revParts.slice(2).join('---').trim();
-           } else {
-               reviewerProfile.systemPrompt = revContent;
-           }
+          reviewerProfile = Agent.loadFromFile(reviewerProfilePath);
+        } else {
+          reviewerProfile = { name: "reviewer", model: "auto", tools: [], systemPrompt: "Reviewer profile missing" };
         }
         if (this.modelOverride) {
           reviewerProfile.model = this.modelOverride;
         }
-        const reviewerAgent = new Agent(reviewerProfile, client, undefined, this.cwdOverride);
+        const reviewerAgent = new Agent(reviewerProfile, client, this.bridgeManager, this.cwdOverride);
         const consensus = new ConsensusManager(agent, reviewerAgent);
         
         const consensusResult = await consensus.coordinate(task, result);

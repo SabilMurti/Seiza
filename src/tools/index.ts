@@ -90,24 +90,22 @@ export class NativeToolsEngine {
   }
 
   public async bash(command: string, timeoutMs: number = 30000): Promise<string> {
-    const { promise, resolve, reject } = Promise.withResolvers<string>();
-
-    exec(command, { cwd: this.projectRoot, timeout: timeoutMs }, (error, stdout, stderr) => {
-      let output = "";
-      if (stdout) output += stdout;
-      if (stderr) output += `\nSTDERR:\n${stderr}`;
-      
-      if (error) {
-         if (error.killed) {
-             output += `\nCommand timed out after ${timeoutMs}ms.`;
-         } else {
-             output += `\nExit code: ${error.code}`;
-         }
-      }
-      
-      resolve(output.trim() || "(no output)");
+    return new Promise<string>((resolve) => {
+      exec(command, { cwd: this.projectRoot, timeout: timeoutMs }, (error, stdout, stderr) => {
+        let output = "";
+        if (stdout) output += stdout;
+        if (stderr) output += `\nSTDERR:\n${stderr}`;
+        
+        if (error) {
+           if (error.killed) {
+               output += `\nCommand timed out after ${timeoutMs}ms.`;
+           } else {
+               output += `\nExit code: ${error.code}`;
+           }
+        }
+        
+        resolve(output.trim() || "(no output)");
+      });
     });
-
-    return promise;
   }
 }

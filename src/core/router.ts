@@ -64,7 +64,7 @@ export class NineRouterClient {
     return [];
   }
 
-  public async createChatCompletion(request: ChatCompletionRequest): Promise<string> {
+  public async createChatCompletion(request: ChatCompletionRequest, retryCount: number = 0): Promise<string> {
     const url = `${this.baseUrl}/chat/completions`;
     const headers = {
       "Content-Type": "application/json",
@@ -84,36 +84,84 @@ export class NineRouterClient {
       request.model = request.model.slice(8);
     }
 
-    if (isStreaming) {
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(request),
-        });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+
+    try {
+      if (isStreaming) {
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(request),
+            signal: controller.signal
+          });
+        } catch (err) {
+          clearTimeout(timeoutId);
+          throw err;
+        }
 
         if (!response.ok) {
+          clearTimeout(timeoutId);
           const errorText = await response.text();
+          // Fallback to alternative model if 404, 429, or 5xx occurs
+          if (([404, 429, 500, 502, 503, 504].includes(response.status)) && retryCount < 3) {
+            let models: string[] = [];
+            try {
+              models = await this.listModels();
+            } catch {
+              models = ["ag/gemini-3-flash", "ag/gemini-3.1-pro-low", "ag/claude-sonnet-4-6"];
+            }
+            const nextModel = models.find(m => m !== request.model && !m.includes(request.model)) || models[0];
+            if (nextModel && nextModel !== request.model) {
+              console.error(`[NineRouterClient] Model '${request.model}' returned HTTP ${response.status}. Retrying with fallback '${nextModel}' (attempt ${retryCount + 1}/3)...`);
+              await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retryCount)));
+              return this.createChatCompletion({ ...request, model: nextModel }, retryCount + 1);
+            }
+          }
           throw new Error(`9Router API error (${response.status}): ${errorText}`);
         }
 
         if (!response.body) {
+          clearTimeout(timeoutId);
           throw new Error("Response body is null, cannot stream");
         }
-        return await this.handleStream(response.body);
-      } catch (err) {
-        console.error(`Streaming failed, falling back to non-streaming: ${err instanceof Error ? err.message : String(err)}`);
-        
-        // Retry with stream: false
-        const fallbackRequest = { ...request, stream: false };
-        const response = await fetch(url, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(fallbackRequest),
-        });
+        const result = await this.handleStream(response.body);
+        clearTimeout(timeoutId);
+        return result;
+      } else {
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(request),
+            signal: controller.signal
+          });
+        } catch (err) {
+          clearTimeout(timeoutId);
+          throw err;
+        }
+
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           const errorText = await response.text();
+          if (([404, 429, 500, 502, 503, 504].includes(response.status)) && retryCount < 3) {
+            let models: string[] = [];
+            try {
+              models = await this.listModels();
+            } catch {
+              models = ["ag/gemini-3-flash", "ag/gemini-3.1-pro-low", "ag/claude-sonnet-4-6"];
+            }
+            const nextModel = models.find(m => m !== request.model && !m.includes(request.model)) || models[0];
+            if (nextModel && nextModel !== request.model) {
+              console.error(`[NineRouterClient] Model '${request.model}' returned HTTP ${response.status}. Retrying with fallback '${nextModel}' (attempt ${retryCount + 1}/3)...`);
+              await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retryCount)));
+              return this.createChatCompletion({ ...request, model: nextModel }, retryCount + 1);
+            }
+          }
           throw new Error(`9Router API error (${response.status}): ${errorText}`);
         }
 
@@ -125,37 +173,18 @@ export class NineRouterClient {
         if (data.usage?.total_tokens) {
           this.totalTokensUsed += data.usage.total_tokens;
         } else {
-          const estimated = JSON.stringify(fallbackRequest.messages).length / 4 + (data.choices[0]?.message?.content?.length || 0) / 4;
+          const estimated = JSON.stringify(request.messages).length / 4 + (data.choices[0]?.message?.content?.length || 0) / 4;
           this.totalTokensUsed += Math.ceil(estimated);
         }
         
         return data.choices[0]?.message?.content || "";
       }
-    } else {
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(request),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`9Router API error (${response.status}): ${errorText}`);
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new Error(`9Router API request timed out after 120s for model '${request.model}'`);
       }
-
-      const data = await response.json() as { 
-        choices: Array<{ message: { content: string } }>;
-        usage?: { total_tokens: number };
-      };
-      
-      if (data.usage?.total_tokens) {
-        this.totalTokensUsed += data.usage.total_tokens;
-      } else {
-        const estimated = JSON.stringify(request.messages).length / 4 + (data.choices[0]?.message?.content?.length || 0) / 4;
-        this.totalTokensUsed += Math.ceil(estimated);
-      }
-      
-      return data.choices[0]?.message?.content || "";
+      throw err;
     }
   }
 
@@ -163,16 +192,19 @@ export class NineRouterClient {
     const reader = body.getReader();
     const decoder = new TextDecoder("utf-8");
     let fullContent = "";
+    let buffer = "";
     
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         
-        const chunkStr = decoder.decode(value, { stream: true });
-        const lines = chunkStr.split("\n").filter(line => line.trim().startsWith("data: "));
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || ""; // retain incomplete line chunk for next read
         
         for (const line of lines) {
+          if (!line.trim().startsWith("data: ")) continue;
           const dataStr = line.replace("data: ", "").trim();
           if (dataStr === "[DONE]") continue;
           
@@ -187,7 +219,7 @@ export class NineRouterClient {
                this.totalTokensUsed += chunk.usage.total_tokens;
             }
           } catch (e) {
-            // Ignore parse errors on partial chunks
+            // Ignore parse errors on partial JSON chunks
           }
         }
       }

@@ -203,7 +203,7 @@ export async function startServer(config: ServerConfig) {
          });
       }
 
-      const runner = new DAGRunner(parsedTasks, agentsDir, args.model as string, args.cwd as string);
+      const runner = new DAGRunner(parsedTasks, agentsDir, args.model as string, args.cwd as string, bridgeManager);
       activeTasks = runner.getTasks();
       
       const finalTasks = await runner.run();
@@ -341,8 +341,15 @@ export async function startServer(config: ServerConfig) {
 
   if (config.http) {
     const app = express();
+    app.disable("x-powered-by");
     app.use(cors());
-    app.use(express.json());
+    app.use(express.json({ limit: "10mb" }));
+    app.use((req, res, next) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("X-Frame-Options", "DENY");
+      res.setHeader("X-XSS-Protection", "1; mode=block");
+      next();
+    });
 
     let sseTransport: SSEServerTransport | null = null;
 
@@ -498,6 +505,9 @@ export async function startServer(config: ServerConfig) {
     app.post("/api/agents/:name", (req, res) => {
       const agentsDir = path.join(__dirname, "..", "agents");
       const name = req.params.name;
+      if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
+        return res.status(400).json({ success: false, error: "Invalid agent name format." });
+      }
       const { model, description, tools, systemPrompt } = req.body;
       try {
         if (!fs.existsSync(agentsDir)) {
@@ -511,7 +521,11 @@ tools: [${tools || ''}]
 ---
 
 ${systemPrompt || ''}`;
-        fs.writeFileSync(path.join(agentsDir, `${name}.md`), content);
+        const targetPath = path.join(agentsDir, `${name}.md`);
+        if (!targetPath.startsWith(agentsDir)) {
+          return res.status(400).json({ success: false, error: "Path traversal rejected." });
+        }
+        fs.writeFileSync(targetPath, content);
         res.json({ success: true, agent: { name, filename: `${name}.md`, description, model, tools, systemPrompt, fullContent: content } });
       } catch (e) {
          console.error("Error writing agent:", e);
@@ -522,12 +536,18 @@ ${systemPrompt || ''}`;
     app.delete("/api/agents/:name", (req, res) => {
       const agentsDir = path.join(__dirname, "..", "agents");
       const name = req.params.name;
+      if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
+        return res.status(400).json({ success: false, error: "Invalid agent name format." });
+      }
       try {
         const files = fs.readdirSync(agentsDir).filter(f => f.endsWith('.md'));
         if (files.length <= 1) {
           return res.status(400).json({ success: false, error: "Cannot delete the last agent." });
         }
         const filePath = path.join(agentsDir, `${name}.md`);
+        if (!filePath.startsWith(agentsDir)) {
+          return res.status(400).json({ success: false, error: "Path traversal rejected." });
+        }
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
         }
