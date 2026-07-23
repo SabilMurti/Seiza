@@ -93,9 +93,15 @@ export class DAGRunner {
             madeProgress = true;
             eventBroker.emit('task_started', { task: { ...task } });
             
-            const p = this.executeTask(task).then(() => {
-              checkReadyAndRun(); // Trigger dependents
-            });
+            const p = this.executeTask(task)
+              .catch((err) => {
+                // Ensure task status is marked as failed even if setup/execution throws
+                task.status = 'failed';
+                task.error = err instanceof Error ? err.message : String(err);
+              })
+              .finally(() => {
+                checkReadyAndRun(); // Trigger dependents
+              });
             executionMap.set(task.id, p);
             promises.push(p);
           }
@@ -135,10 +141,18 @@ export class DAGRunner {
   }
 
   private async executeTask(task: Task): Promise<void> {
+    console.log("[executeTask] started");
     const logger = getLogger();
-    logger.logTaskStart(task.id, 'session_mock', task.prompt); // 'session_mock' needs to be replaced later with actual session id if passed to DAGRunner
+    console.log("[executeTask] logger retrieved");
 
     try {
+      try {
+        logger.logTaskStart(task.id, 'session_mock', task.prompt); // 'session_mock' needs to be replaced later with actual session id if passed to DAGRunner
+        console.log("[executeTask] logTaskStart finished");
+      } catch (logErr) {
+        console.warn("[executeTask] Warning: Failed to log task start to SQLite database:", logErr);
+      }
+
       if (task.prompt.includes('#butuh-manusia')) {
         const approved = await hitlManager.requestApproval(task);
         if (!approved) {
@@ -148,10 +162,13 @@ export class DAGRunner {
         eventBroker.emit('task_updated', { ...task });
       }
 
+      console.log("[executeTask] profile path:", path.join(this.agentsDir, `${task.agent}.md`));
       const profilePath = path.join(this.agentsDir, `${task.agent}.md`);
       let profile: AgentProfile;
       if (fs.existsSync(profilePath)) {
+        console.log("[executeTask] loading profile...");
         profile = Agent.loadFromFile(profilePath);
+        console.log("[executeTask] profile loaded:", profile.name);
       } else {
         profile = { name: task.agent, model: "auto", tools: [], systemPrompt: `You are a ${task.agent} agent.` };
       }
@@ -160,10 +177,13 @@ export class DAGRunner {
       if (this.modelOverride) {
         profile.model = this.modelOverride;
       }
+      console.log("[executeTask] instantiating agent with model:", profile.model);
       const agent = new Agent(profile, client, this.bridgeManager, this.cwdOverride);
+      console.log("[executeTask] agent instantiated. Running agent...");
       
       // If the task is a coder task, we might want to run consensus
       let result = await agent.run(task.prompt);
+      console.log("[executeTask] agent.run completed. Result length:", result.length);
       
       if (task.agent === 'coder') {
         // Setup reviewer — only run consensus if a proper reviewer.md profile exists
@@ -180,22 +200,38 @@ export class DAGRunner {
           if (!consensusResult.success) {
             throw new Error(`Consensus failed: ${consensusResult.verdict}`);
           }
-          logger.logEvent(task.id, 'info', 'consensus', `Consensus reached: ${consensusResult.verdict}`);
+          try {
+            logger.logEvent(task.id, 'info', 'consensus', `Consensus reached: ${consensusResult.verdict}`);
+          } catch (logErr) {
+            console.warn("[executeTask] Warning: Failed to log consensus event to SQLite database:", logErr);
+          }
         } else {
-          logger.logEvent(task.id, 'info', 'consensus', 'No reviewer.md found — skipping consensus step.');
+          try {
+            logger.logEvent(task.id, 'info', 'consensus', 'No reviewer.md found — skipping consensus step.');
+          } catch (logErr) {
+            console.warn("[executeTask] Warning: Failed to log consensus skip event to SQLite database:", logErr);
+          }
         }
       }
 
       task.result = result;
       task.status = 'completed';
       eventBroker.emit('task_completed', { task: { ...task } });
-      logger.logTaskEnd(task.id, 'completed');
+      try {
+        logger.logTaskEnd(task.id, 'completed');
+      } catch (logErr) {
+        console.warn("[executeTask] Warning: Failed to log task end to SQLite database:", logErr);
+      }
     } catch (e) {
       task.error = e instanceof Error ? e.message : String(e);
       task.status = 'failed';
       eventBroker.emit('task_failed', { task: { ...task } });
-      logger.logEvent(task.id, 'error', task.agent, task.error);
-      logger.logTaskEnd(task.id, 'failed');
+      try {
+        logger.logEvent(task.id, 'error', task.agent, task.error);
+        logger.logTaskEnd(task.id, 'failed');
+      } catch (logErr) {
+        console.warn("[executeTask] Warning: Failed to log task failure to SQLite database:", logErr);
+      }
       throw e;
     }
   }

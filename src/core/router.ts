@@ -204,8 +204,28 @@ export class NineRouterClient {
         buffer = lines.pop() || ""; // retain incomplete line chunk for next read
         
         for (const line of lines) {
-          if (!line.trim().startsWith("data: ")) continue;
-          const dataStr = line.replace("data: ", "").trim();
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          if (!trimmed.startsWith("data: ")) {
+            // Fallback: Check if this is a complete JSON completion object (non-SSE or malformed stream)
+            try {
+              const obj = JSON.parse(trimmed);
+              const content = obj.choices?.[0]?.message?.content || obj.choices?.[0]?.delta?.content;
+              if (content) {
+                fullContent += content;
+                process.stderr.write(content);
+              }
+              if (obj.usage?.total_tokens) {
+                this.totalTokensUsed += obj.usage.total_tokens;
+              }
+            } catch (e) {
+              // Ignore parse errors
+            }
+            continue;
+          }
+
+          const dataStr = trimmed.replace("data: ", "").trim();
           if (dataStr === "[DONE]") continue;
           
           try {

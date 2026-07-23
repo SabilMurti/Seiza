@@ -11,6 +11,9 @@ export class SessionLogger {
   constructor(config: SessionLoggerConfig) {
     const dbPath = path.join(config.dataDir, 'sessions.db');
     this.db = new Database(dbPath);
+    try {
+      this.db.exec("PRAGMA foreign_keys = OFF;");
+    } catch {}
     this.initSchema();
   }
 

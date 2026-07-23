@@ -801,8 +801,24 @@ var NineRouterClient = class {
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
         for (const line of lines) {
-          if (!line.trim().startsWith("data: ")) continue;
-          const dataStr = line.replace("data: ", "").trim();
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          if (!trimmed.startsWith("data: ")) {
+            try {
+              const obj = JSON.parse(trimmed);
+              const content = obj.choices?.[0]?.message?.content || obj.choices?.[0]?.delta?.content;
+              if (content) {
+                fullContent += content;
+                process.stderr.write(content);
+              }
+              if (obj.usage?.total_tokens) {
+                this.totalTokensUsed += obj.usage.total_tokens;
+              }
+            } catch (e) {
+            }
+            continue;
+          }
+          const dataStr = trimmed.replace("data: ", "").trim();
           if (dataStr === "[DONE]") continue;
           try {
             const chunk = JSON.parse(dataStr);
@@ -1003,7 +1019,10 @@ var DAGRunner = class {
             task.status = "running";
             madeProgress = true;
             eventBroker.emit("task_started", { task: { ...task } });
-            const p = this.executeTask(task).then(() => {
+            const p = this.executeTask(task).catch((err) => {
+              task.status = "failed";
+              task.error = err instanceof Error ? err.message : String(err);
+            }).finally(() => {
               checkReadyAndRun();
             });
             executionMap.set(task.id, p);
@@ -1035,9 +1054,16 @@ var DAGRunner = class {
     return Array.from(this.tasks.values());
   }
   async executeTask(task) {
+    console.log("[executeTask] started");
     const logger = getLogger();
-    logger.logTaskStart(task.id, "session_mock", task.prompt);
+    console.log("[executeTask] logger retrieved");
     try {
+      try {
+        logger.logTaskStart(task.id, "session_mock", task.prompt);
+        console.log("[executeTask] logTaskStart finished");
+      } catch (logErr) {
+        console.warn("[executeTask] Warning: Failed to log task start to SQLite database:", logErr);
+      }
       if (task.prompt.includes("#butuh-manusia")) {
         const approved = await hitlManager.requestApproval(task);
         if (!approved) {
@@ -1046,10 +1072,13 @@ var DAGRunner = class {
         task.status = "running";
         eventBroker.emit("task_updated", { ...task });
       }
+      console.log("[executeTask] profile path:", path5.join(this.agentsDir, `${task.agent}.md`));
       const profilePath = path5.join(this.agentsDir, `${task.agent}.md`);
       let profile;
       if (fs6.existsSync(profilePath)) {
+        console.log("[executeTask] loading profile...");
         profile = Agent.loadFromFile(profilePath);
+        console.log("[executeTask] profile loaded:", profile.name);
       } else {
         profile = { name: task.agent, model: "auto", tools: [], systemPrompt: `You are a ${task.agent} agent.` };
       }
@@ -1057,8 +1086,11 @@ var DAGRunner = class {
       if (this.modelOverride) {
         profile.model = this.modelOverride;
       }
+      console.log("[executeTask] instantiating agent with model:", profile.model);
       const agent = new Agent(profile, client, this.bridgeManager, this.cwdOverride);
+      console.log("[executeTask] agent instantiated. Running agent...");
       let result = await agent.run(task.prompt);
+      console.log("[executeTask] agent.run completed. Result length:", result.length);
       if (task.agent === "coder") {
         const reviewerProfilePath = path5.join(this.agentsDir, `reviewer.md`);
         if (fs6.existsSync(reviewerProfilePath)) {
@@ -1072,21 +1104,37 @@ var DAGRunner = class {
           if (!consensusResult.success) {
             throw new Error(`Consensus failed: ${consensusResult.verdict}`);
           }
-          logger.logEvent(task.id, "info", "consensus", `Consensus reached: ${consensusResult.verdict}`);
+          try {
+            logger.logEvent(task.id, "info", "consensus", `Consensus reached: ${consensusResult.verdict}`);
+          } catch (logErr) {
+            console.warn("[executeTask] Warning: Failed to log consensus event to SQLite database:", logErr);
+          }
         } else {
-          logger.logEvent(task.id, "info", "consensus", "No reviewer.md found \u2014 skipping consensus step.");
+          try {
+            logger.logEvent(task.id, "info", "consensus", "No reviewer.md found \u2014 skipping consensus step.");
+          } catch (logErr) {
+            console.warn("[executeTask] Warning: Failed to log consensus skip event to SQLite database:", logErr);
+          }
         }
       }
       task.result = result;
       task.status = "completed";
       eventBroker.emit("task_completed", { task: { ...task } });
-      logger.logTaskEnd(task.id, "completed");
+      try {
+        logger.logTaskEnd(task.id, "completed");
+      } catch (logErr) {
+        console.warn("[executeTask] Warning: Failed to log task end to SQLite database:", logErr);
+      }
     } catch (e) {
       task.error = e instanceof Error ? e.message : String(e);
       task.status = "failed";
       eventBroker.emit("task_failed", { task: { ...task } });
-      logger.logEvent(task.id, "error", task.agent, task.error);
-      logger.logTaskEnd(task.id, "failed");
+      try {
+        logger.logEvent(task.id, "error", task.agent, task.error);
+        logger.logTaskEnd(task.id, "failed");
+      } catch (logErr) {
+        console.warn("[executeTask] Warning: Failed to log task failure to SQLite database:", logErr);
+      }
       throw e;
     }
   }
