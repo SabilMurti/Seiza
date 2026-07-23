@@ -20,6 +20,7 @@ let activeTasks: Task[] = [];
 import { RuleManager } from "./core/rules.js";
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { initLogger } from "./core/abstraction.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,6 +33,7 @@ export interface ServerConfig {
 
 export async function startServer(config: ServerConfig) {
   const configManager = new ConfigManager(config.dataDir);
+  initLogger({ dataDir: config.dataDir });
   const bridgeManager = new MCPBridgeManager(configManager);
   await bridgeManager.initializeAll();
   const skillManager = new SkillManager(process.cwd());

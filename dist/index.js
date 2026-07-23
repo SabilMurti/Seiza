@@ -3,7 +3,7 @@
 // src/index.ts
 import { Command } from "commander";
 import { spawn as spawn2 } from "child_process";
-import path7 from "path";
+import path8 from "path";
 import fs8 from "fs";
 import os3 from "os";
 import { fileURLToPath as fileURLToPath2 } from "url";
@@ -285,7 +285,7 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import express from "express";
 import cors from "cors";
-import path6 from "path";
+import path7 from "path";
 
 // src/core/agent.ts
 import * as fs5 from "fs";
@@ -847,7 +847,7 @@ var NineRouterClient = class {
 
 // src/core/dag.ts
 import fs6 from "fs";
-import path5 from "path";
+import path6 from "path";
 
 // src/core/hitl.ts
 var HITLManager = class {
@@ -879,7 +879,90 @@ var hitlManager = new HITLManager();
 
 // src/core/abstraction.ts
 import Database from "better-sqlite3";
+import path5 from "path";
+var SessionLogger = class {
+  db;
+  constructor(config) {
+    const dbPath = path5.join(config.dataDir, "sessions.db");
+    this.db = new Database(dbPath);
+    try {
+      this.db.exec("PRAGMA foreign_keys = OFF;");
+    } catch {
+    }
+    this.initSchema();
+  }
+  initSchema() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        end_time DATETIME,
+        status TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        prompt TEXT,
+        status TEXT,
+        start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        end_time DATETIME,
+        FOREIGN KEY(session_id) REFERENCES sessions(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT,
+        type TEXT,
+        agent TEXT,
+        message TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(task_id) REFERENCES tasks(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT,
+        agent TEXT,
+        role TEXT,
+        content TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(task_id) REFERENCES tasks(id)
+      );
+    `);
+  }
+  logSessionStart(sessionId) {
+    const stmt = this.db.prepare("INSERT INTO sessions (id, status) VALUES (?, ?)");
+    stmt.run(sessionId, "running");
+  }
+  logSessionEnd(sessionId, status) {
+    const stmt = this.db.prepare("UPDATE sessions SET end_time = CURRENT_TIMESTAMP, status = ? WHERE id = ?");
+    stmt.run(status, sessionId);
+  }
+  logTaskStart(taskId, sessionId, prompt) {
+    const stmt = this.db.prepare("INSERT INTO tasks (id, session_id, prompt, status) VALUES (?, ?, ?, ?)");
+    stmt.run(taskId, sessionId, prompt, "running");
+  }
+  logTaskEnd(taskId, status) {
+    const stmt = this.db.prepare("UPDATE tasks SET end_time = CURRENT_TIMESTAMP, status = ? WHERE id = ?");
+    stmt.run(status, taskId);
+  }
+  logEvent(taskId, type, agent, message) {
+    const stmt = this.db.prepare("INSERT INTO logs (task_id, type, agent, message) VALUES (?, ?, ?, ?)");
+    stmt.run(taskId, type, agent, message);
+  }
+  logConversation(taskId, agent, role, content) {
+    const stmt = this.db.prepare("INSERT INTO agent_conversations (task_id, agent, role, content) VALUES (?, ?, ?, ?)");
+    stmt.run(taskId, agent, role, content);
+  }
+};
 var instance = null;
+function initLogger(config) {
+  if (!instance) {
+    instance = new SessionLogger(config);
+  }
+  return instance;
+}
 function getLogger() {
   if (!instance) {
     throw new Error("SessionLogger not initialized. Call initLogger first.");
@@ -1069,7 +1152,7 @@ var DAGRunner = class {
         task.status = "running";
         eventBroker.emit("task_updated", { ...task });
       }
-      const profilePath = path5.join(this.agentsDir, `${task.agent}.md`);
+      const profilePath = path6.join(this.agentsDir, `${task.agent}.md`);
       let profile;
       if (fs6.existsSync(profilePath)) {
         profile = Agent.loadFromFile(profilePath);
@@ -1083,7 +1166,7 @@ var DAGRunner = class {
       const agent = new Agent(profile, client, this.bridgeManager, this.cwdOverride);
       let result = await agent.run(task.prompt);
       if (task.agent === "coder") {
-        const reviewerProfilePath = path5.join(this.agentsDir, `reviewer.md`);
+        const reviewerProfilePath = path6.join(this.agentsDir, `reviewer.md`);
         if (fs6.existsSync(reviewerProfilePath)) {
           let reviewerProfile = Agent.loadFromFile(reviewerProfilePath);
           if (this.modelOverride) {
@@ -1136,9 +1219,10 @@ import { fileURLToPath } from "url";
 import fs7 from "fs";
 var activeTasks = [];
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = path6.dirname(__filename);
+var __dirname = path7.dirname(__filename);
 async function startServer(config) {
   const configManager = new ConfigManager(config.dataDir);
+  initLogger({ dataDir: config.dataDir });
   const bridgeManager = new MCPBridgeManager(configManager);
   await bridgeManager.initializeAll();
   const skillManager = new SkillManager(process.cwd());
@@ -1272,7 +1356,7 @@ async function startServer(config) {
       if (!prompt) {
         throw new Error("Prompt is required");
       }
-      const agentsDir = path6.join(__dirname, "..", "agents");
+      const agentsDir = path7.join(__dirname, "..", "agents");
       let parsedTasks;
       if (Array.isArray(args.dag) && args.dag.length > 0) {
         parsedTasks = args.dag;
@@ -1324,8 +1408,8 @@ ${JSON.stringify(finalTasks, null, 2)}`
       const prompt = args.prompt;
       const modelOverride = args.model;
       const cwdOverride = args.cwd;
-      const agentsDir = path6.join(__dirname, "..", "agents");
-      const profilePath = path6.join(agentsDir, `${agentName}.md`);
+      const agentsDir = path7.join(__dirname, "..", "agents");
+      const profilePath = path7.join(agentsDir, `${agentName}.md`);
       if (!fs7.existsSync(profilePath)) {
         throw new Error(`Agent ${agentName} not found.`);
       }
@@ -1386,11 +1470,11 @@ ${ins}`;
       };
     }
     if (name === "list_seiza_agents") {
-      const agentsDir = path6.join(__dirname, "..", "agents");
+      const agentsDir = path7.join(__dirname, "..", "agents");
       let agents = [];
       try {
         const files = fs7.readdirSync(agentsDir).filter((f) => f.endsWith(".md"));
-        agents = files.map((f) => Agent.loadFromFile(path6.join(agentsDir, f)));
+        agents = files.map((f) => Agent.loadFromFile(path7.join(agentsDir, f)));
       } catch (e) {
         console.error("Failed to list agents", e);
       }
@@ -1588,11 +1672,11 @@ data: ${JSON.stringify(data)}
       res.json({ success: true });
     });
     app.get("/api/agents", (req, res) => {
-      const agentsDir = path6.join(__dirname, "..", "agents");
+      const agentsDir = path7.join(__dirname, "..", "agents");
       try {
         const files = fs7.readdirSync(agentsDir).filter((f) => f.endsWith(".md"));
         const agents = files.map((f) => {
-          const filePath = path6.join(agentsDir, f);
+          const filePath = path7.join(agentsDir, f);
           const content = fs7.readFileSync(filePath, "utf-8");
           let name = f.replace(".md", "");
           let description = "";
@@ -1634,7 +1718,7 @@ data: ${JSON.stringify(data)}
       }
     });
     app.post("/api/agents/:name", (req, res) => {
-      const agentsDir = path6.join(__dirname, "..", "agents");
+      const agentsDir = path7.join(__dirname, "..", "agents");
       const name = req.params.name;
       if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
         return res.status(400).json({ success: false, error: "Invalid agent name format." });
@@ -1652,7 +1736,7 @@ tools: [${tools || ""}]
 ---
 
 ${systemPrompt || ""}`;
-        const targetPath = path6.join(agentsDir, `${name}.md`);
+        const targetPath = path7.join(agentsDir, `${name}.md`);
         if (!targetPath.startsWith(agentsDir)) {
           return res.status(400).json({ success: false, error: "Path traversal rejected." });
         }
@@ -1664,7 +1748,7 @@ ${systemPrompt || ""}`;
       }
     });
     app.delete("/api/agents/:name", (req, res) => {
-      const agentsDir = path6.join(__dirname, "..", "agents");
+      const agentsDir = path7.join(__dirname, "..", "agents");
       const name = req.params.name;
       if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
         return res.status(400).json({ success: false, error: "Invalid agent name format." });
@@ -1674,7 +1758,7 @@ ${systemPrompt || ""}`;
         if (files.length <= 1) {
           return res.status(400).json({ success: false, error: "Cannot delete the last agent." });
         }
-        const filePath = path6.join(agentsDir, `${name}.md`);
+        const filePath = path7.join(agentsDir, `${name}.md`);
         if (!filePath.startsWith(agentsDir)) {
           return res.status(400).json({ success: false, error: "Path traversal rejected." });
         }
@@ -1734,12 +1818,12 @@ ${systemPrompt || ""}`;
     app.get("/api/config", (req, res) => {
       res.json({ dataDir: config.dataDir, port: config.port });
     });
-    const dashboardPath = path6.join(__dirname, "..", "dashboard", "dist");
+    const dashboardPath = path7.join(__dirname, "..", "dashboard", "dist");
     if (fs7.existsSync(dashboardPath)) {
       app.use(express.static(dashboardPath));
       app.get("*", (req, res) => {
         if (!req.path.startsWith("/api") && !req.path.startsWith("/messages")) {
-          res.sendFile(path6.join(dashboardPath, "index.html"));
+          res.sendFile(path7.join(dashboardPath, "index.html"));
         } else {
           res.status(404).json({ error: "Not found" });
         }
@@ -1769,9 +1853,9 @@ ${systemPrompt || ""}`;
 
 // src/index.ts
 var __filename2 = fileURLToPath2(import.meta.url);
-var __dirname2 = path7.dirname(__filename2);
+var __dirname2 = path8.dirname(__filename2);
 var program = new Command();
-program.name("seiza").description("Seiza MCP Server and Dashboard").version("0.1.0").option("--data-dir <path>", "custom data directory", path7.join(os3.homedir(), ".seiza")).option("--http", "enable HTTP/SSE server mode", true).option("--no-dashboard", "disable HTTP Web Dashboard server").option("-p, --port <number>", "port number", (val) => parseInt(val, 10), 3456).option("-d, --daemon", "run server in background daemon mode", false);
+program.name("seiza").description("Seiza MCP Server and Dashboard").version("0.1.0").option("--data-dir <path>", "custom data directory", path8.join(os3.homedir(), ".seiza")).option("--http", "enable HTTP/SSE server mode", true).option("--no-dashboard", "disable HTTP Web Dashboard server").option("-p, --port <number>", "port number", (val) => parseInt(val, 10), 3456).option("-d, --daemon", "run server in background daemon mode", false);
 program.parse(process.argv);
 var options = program.opts();
 var isHttpEnabled = options.dashboard !== false && options.http !== false;
@@ -1786,8 +1870,8 @@ async function main() {
       process.exit(1);
     }
     console.log(`Starting Seiza daemon on port ${options.port}...`);
-    const logFile = path7.join(dataDir, "seiza.log");
-    const errFile = path7.join(dataDir, "seiza.err");
+    const logFile = path8.join(dataDir, "seiza.log");
+    const errFile = path8.join(dataDir, "seiza.err");
     const out = fs8.openSync(logFile, "a");
     const err = fs8.openSync(errFile, "a");
     const scriptPath = __filename2;
