@@ -20,11 +20,16 @@ export class Agent {
   private history: ChatMessage[] = [];
   private bridgeManager?: MCPBridgeManager;
 
-  constructor(profile: AgentProfile, client: NineRouterClient, bridgeManager?: MCPBridgeManager, cwdOverride?: string) {
+  private maxIterations: number = 15;
+
+  constructor(profile: AgentProfile, client: NineRouterClient, bridgeManager?: MCPBridgeManager, cwdOverride?: string, maxIterations?: number) {
     this.profile = { ...profile };
     this.client = client;
     this.bridgeManager = bridgeManager;
     this.toolsEngine = new NativeToolsEngine(cwdOverride);
+    if (maxIterations !== undefined) {
+      this.maxIterations = maxIterations;
+    }
 
     // Inject System & Project Rules
     const combinedRules = RuleManager.getCombinedRules(cwdOverride);
@@ -153,9 +158,8 @@ export class Agent {
     });
 
     let iteration = 0;
-    const maxIterations = 15;
 
-    while (iteration < maxIterations) {
+    while (iteration < this.maxIterations) {
       iteration++;
       console.error(`\n--- Agent ${this.profile.name} Iteration ${iteration} ---`);
 

@@ -26,11 +26,15 @@ export class DAGRunner {
   private cwdOverride?: string;
   private bridgeManager?: any;
 
-  constructor(tasks: Task[], agentsDir: string, modelOverride?: string, cwdOverride?: string, bridgeManager?: any) {
+  private nineRouterOptions?: any;
+
+  constructor(tasks: Task[], agentsDir: string, modelOverride?: string, cwdOverride?: string, bridgeManager?: any, nineRouterOptions?: any) {
+    this.tasks = new Map<string, Task>();
     this.agentsDir = agentsDir;
     this.modelOverride = modelOverride;
     this.cwdOverride = cwdOverride;
     this.bridgeManager = bridgeManager;
+    this.nineRouterOptions = nineRouterOptions;
     for (const task of tasks) {
       if (this.tasks.has(task.id)) {
         throw new Error(`Duplicate task ID: ${task.id}`);
@@ -167,11 +171,14 @@ export class DAGRunner {
         profile = { name: task.agent, model: "auto", tools: [], systemPrompt: `You are a ${task.agent} agent.` };
       }
 
-      const client = new NineRouterClient({ apiKey: process.env.OPENROUTER_API_KEY || '' });
+      const client = new NineRouterClient({ 
+        apiKey: process.env.OPENROUTER_API_KEY || '',
+        ...this.nineRouterOptions
+      });
       if (this.modelOverride) {
         profile.model = this.modelOverride;
       }
-      const agent = new Agent(profile, client, this.bridgeManager, this.cwdOverride);
+      const agent = new Agent(profile, client, this.bridgeManager, this.cwdOverride, this.nineRouterOptions?.maxIterations);
       
       // If the task is a coder task, we might want to run consensus
       let result = await agent.run(task.prompt);
@@ -184,7 +191,7 @@ export class DAGRunner {
           if (this.modelOverride) {
             reviewerProfile.model = this.modelOverride;
           }
-          const reviewerAgent = new Agent(reviewerProfile, client, this.bridgeManager, this.cwdOverride);
+          const reviewerAgent = new Agent(reviewerProfile, client, this.bridgeManager, this.cwdOverride, this.nineRouterOptions?.maxIterations);
           const consensus = new ConsensusManager(agent, reviewerAgent);
           
           const consensusResult = await consensus.coordinate(task, result);

@@ -5,6 +5,9 @@ export interface Config {
   nineRouter: {
     apiKey: string;
     baseUrl: string;
+    enableFallback: boolean;
+    fallbackModel: string;
+    maxIterations: number;
   };
   modelRoles: {
     planner: string;
@@ -35,7 +38,7 @@ export interface Config {
 }
 
 const DEFAULT_CONFIG: Config = {
-  nineRouter: { apiKey: "free", baseUrl: "http://localhost:20128/v1" },
+  nineRouter: { apiKey: "free", baseUrl: "http://localhost:20128/v1", enableFallback: true, fallbackModel: "FREE", maxIterations: 15 },
   modelRoles: { planner: "", coder: "", reviewer: "", scout: "" },
   sandbox: { driver: "local", dockerImage: "ubuntu:latest", timeoutMs: 300000 },
   consensus: { maxRetries: 3, strictMode: false },

@@ -12,7 +12,7 @@ import { fileURLToPath as fileURLToPath2 } from "url";
 import * as fs from "fs";
 import * as path from "path";
 var DEFAULT_CONFIG = {
-  nineRouter: { apiKey: "free", baseUrl: "http://localhost:20128/v1" },
+  nineRouter: { apiKey: "free", baseUrl: "http://localhost:20128/v1", enableFallback: true, fallbackModel: "FREE", maxIterations: 15 },
   modelRoles: { planner: "", coder: "", reviewer: "", scout: "" },
   sandbox: { driver: "local", dockerImage: "ubuntu:latest", timeoutMs: 3e5 },
   consensus: { maxRetries: 3, strictMode: false },
@@ -478,11 +478,15 @@ var Agent = class {
   toolsEngine;
   history = [];
   bridgeManager;
-  constructor(profile, client, bridgeManager, cwdOverride) {
+  maxIterations = 15;
+  constructor(profile, client, bridgeManager, cwdOverride, maxIterations) {
     this.profile = { ...profile };
     this.client = client;
     this.bridgeManager = bridgeManager;
     this.toolsEngine = new NativeToolsEngine(cwdOverride);
+    if (maxIterations !== void 0) {
+      this.maxIterations = maxIterations;
+    }
     const combinedRules = RuleManager.getCombinedRules(cwdOverride);
     if (combinedRules) {
       this.profile.systemPrompt += `
@@ -596,8 +600,7 @@ ${result}`);
       content: initialUserMessage
     });
     let iteration = 0;
-    const maxIterations = 15;
-    while (iteration < maxIterations) {
+    while (iteration < this.maxIterations) {
       iteration++;
       console.error(`
 --- Agent ${this.profile.name} Iteration ${iteration} ---`);
@@ -663,9 +666,13 @@ var NineRouterClient = class {
   apiKey;
   baseUrl;
   totalTokensUsed = 0;
+  enableFallback;
+  fallbackModel;
   constructor(options2) {
     this.baseUrl = options2?.baseUrl && options2.baseUrl.trim().length > 0 ? options2.baseUrl : process.env.NINE_ROUTER_BASE_URL || "http://localhost:20128/v1";
     this.apiKey = options2?.apiKey && options2.apiKey.trim().length > 0 ? options2.apiKey : process.env.NINE_ROUTER_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || "free";
+    this.enableFallback = options2?.enableFallback !== false;
+    this.fallbackModel = options2?.fallbackModel || "FREE";
   }
   async listModels() {
     try {
@@ -716,14 +723,8 @@ var NineRouterClient = class {
         if (!response.ok) {
           clearTimeout(timeoutId);
           const errorText = await response.text();
-          if ([404, 429, 500, 502, 503, 504].includes(response.status) && retryCount < 3) {
-            let models = [];
-            try {
-              models = await this.listModels();
-            } catch {
-              models = ["ag/gemini-3-flash", "ag/gemini-3.1-pro-low", "ag/claude-sonnet-4-6"];
-            }
-            const nextModel = models.find((m) => m !== request.model && !m.includes(request.model)) || models[0];
+          if (this.enableFallback && [404, 429, 500, 502, 503, 504].includes(response.status) && retryCount < 3) {
+            const nextModel = await this.getNextFallbackModel(request.model);
             if (nextModel && nextModel !== request.model) {
               console.error(`[NineRouterClient] Model '${request.model}' returned HTTP ${response.status}. Retrying with fallback '${nextModel}' (attempt ${retryCount + 1}/3)...`);
               await new Promise((r) => setTimeout(r, 1e3 * Math.pow(2, retryCount)));
@@ -755,14 +756,8 @@ var NineRouterClient = class {
         clearTimeout(timeoutId);
         if (!response.ok) {
           const errorText = await response.text();
-          if ([404, 429, 500, 502, 503, 504].includes(response.status) && retryCount < 3) {
-            let models = [];
-            try {
-              models = await this.listModels();
-            } catch {
-              models = ["ag/gemini-3-flash", "ag/gemini-3.1-pro-low", "ag/claude-sonnet-4-6"];
-            }
-            const nextModel = models.find((m) => m !== request.model && !m.includes(request.model)) || models[0];
+          if (this.enableFallback && [404, 429, 500, 502, 503, 504].includes(response.status) && retryCount < 3) {
+            const nextModel = await this.getNextFallbackModel(request.model);
             if (nextModel && nextModel !== request.model) {
               console.error(`[NineRouterClient] Model '${request.model}' returned HTTP ${response.status}. Retrying with fallback '${nextModel}' (attempt ${retryCount + 1}/3)...`);
               await new Promise((r) => setTimeout(r, 1e3 * Math.pow(2, retryCount)));
@@ -842,6 +837,19 @@ var NineRouterClient = class {
       this.totalTokensUsed += Math.ceil(fullContent.length / 4);
     }
     return fullContent;
+  }
+  async getNextFallbackModel(currentModel) {
+    if (!this.enableFallback) return null;
+    if (this.fallbackModel && this.fallbackModel !== "FREE") {
+      return this.fallbackModel === currentModel ? null : this.fallbackModel;
+    }
+    let models = [];
+    try {
+      models = await this.listModels();
+    } catch {
+      models = ["ag/gemini-3-flash", "ag/gemini-3.1-pro-low", "ag/claude-sonnet-4-6"];
+    }
+    return models.find((m) => m !== currentModel && !m.includes(currentModel)) || models[0] || null;
   }
 };
 
@@ -1046,11 +1054,14 @@ var DAGRunner = class {
   modelOverride;
   cwdOverride;
   bridgeManager;
-  constructor(tasks, agentsDir, modelOverride, cwdOverride, bridgeManager) {
+  nineRouterOptions;
+  constructor(tasks, agentsDir, modelOverride, cwdOverride, bridgeManager, nineRouterOptions) {
+    this.tasks = /* @__PURE__ */ new Map();
     this.agentsDir = agentsDir;
     this.modelOverride = modelOverride;
     this.cwdOverride = cwdOverride;
     this.bridgeManager = bridgeManager;
+    this.nineRouterOptions = nineRouterOptions;
     for (const task of tasks) {
       if (this.tasks.has(task.id)) {
         throw new Error(`Duplicate task ID: ${task.id}`);
@@ -1159,11 +1170,14 @@ var DAGRunner = class {
       } else {
         profile = { name: task.agent, model: "auto", tools: [], systemPrompt: `You are a ${task.agent} agent.` };
       }
-      const client = new NineRouterClient({ apiKey: process.env.OPENROUTER_API_KEY || "" });
+      const client = new NineRouterClient({
+        apiKey: process.env.OPENROUTER_API_KEY || "",
+        ...this.nineRouterOptions
+      });
       if (this.modelOverride) {
         profile.model = this.modelOverride;
       }
-      const agent = new Agent(profile, client, this.bridgeManager, this.cwdOverride);
+      const agent = new Agent(profile, client, this.bridgeManager, this.cwdOverride, this.nineRouterOptions?.maxIterations);
       let result = await agent.run(task.prompt);
       if (task.agent === "coder") {
         const reviewerProfilePath = path6.join(this.agentsDir, `reviewer.md`);
@@ -1172,7 +1186,7 @@ var DAGRunner = class {
           if (this.modelOverride) {
             reviewerProfile.model = this.modelOverride;
           }
-          const reviewerAgent = new Agent(reviewerProfile, client, this.bridgeManager, this.cwdOverride);
+          const reviewerAgent = new Agent(reviewerProfile, client, this.bridgeManager, this.cwdOverride, this.nineRouterOptions?.maxIterations);
           const consensus = new ConsensusManager(agent, reviewerAgent);
           const consensusResult = await consensus.coordinate(task, result);
           if (!consensusResult.success) {
@@ -1387,7 +1401,14 @@ ${ins}`;
           task.prompt += injectedSkillsContext;
         });
       }
-      const runner = new DAGRunner(parsedTasks, agentsDir, args.model, args.cwd, bridgeManager);
+      const runner = new DAGRunner(
+        parsedTasks,
+        agentsDir,
+        args.model,
+        args.cwd,
+        bridgeManager,
+        configManager.getConfig().nineRouter
+      );
       activeTasks = runner.getTasks();
       let finalTasks;
       try {
@@ -1420,7 +1441,9 @@ ${JSON.stringify(finalTasks, null, 2)}`
       const cfg = configManager.getConfig();
       const client = new NineRouterClient({
         apiKey: cfg.nineRouter.apiKey,
-        baseUrl: cfg.nineRouter.baseUrl
+        baseUrl: cfg.nineRouter.baseUrl,
+        enableFallback: cfg.nineRouter.enableFallback,
+        fallbackModel: cfg.nineRouter.fallbackModel
       });
       let injectedSkillsContext = "";
       if (Array.isArray(args.skills)) {
@@ -1452,7 +1475,7 @@ ${ins}`;
         activeTasks.push(dummyTask);
       }
       eventBroker.emit("task_started", { task: dummyTask });
-      const agent = new Agent(profile, client, bridgeManager, cwdOverride);
+      const agent = new Agent(profile, client, bridgeManager, cwdOverride, cfg.nineRouter.maxIterations);
       let result;
       try {
         result = await agent.run(prompt);

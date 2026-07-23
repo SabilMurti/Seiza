@@ -31,12 +31,16 @@ export interface ChatCompletionChunk {
 export interface NineRouterClientOptions {
   apiKey?: string;
   baseUrl?: string;
+  enableFallback?: boolean;
+  fallbackModel?: string;
 }
 
 export class NineRouterClient {
   private apiKey: string;
   private baseUrl: string;
   private totalTokensUsed: number = 0;
+  private enableFallback: boolean;
+  private fallbackModel: string;
 
   constructor(options?: NineRouterClientOptions) {
     this.baseUrl = (options?.baseUrl && options.baseUrl.trim().length > 0)
@@ -45,6 +49,8 @@ export class NineRouterClient {
     this.apiKey = (options?.apiKey && options.apiKey.trim().length > 0)
       ? options.apiKey
       : (process.env.NINE_ROUTER_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || "free");
+    this.enableFallback = options?.enableFallback !== false; // Default true
+    this.fallbackModel = options?.fallbackModel || "FREE";
   }
 
   public async listModels(): Promise<string[]> {
@@ -106,14 +112,8 @@ export class NineRouterClient {
           clearTimeout(timeoutId);
           const errorText = await response.text();
           // Fallback to alternative model if 404, 429, or 5xx occurs
-          if (([404, 429, 500, 502, 503, 504].includes(response.status)) && retryCount < 3) {
-            let models: string[] = [];
-            try {
-              models = await this.listModels();
-            } catch {
-              models = ["ag/gemini-3-flash", "ag/gemini-3.1-pro-low", "ag/claude-sonnet-4-6"];
-            }
-            const nextModel = models.find(m => m !== request.model && !m.includes(request.model)) || models[0];
+          if (this.enableFallback && ([404, 429, 500, 502, 503, 504].includes(response.status)) && retryCount < 3) {
+            const nextModel = await this.getNextFallbackModel(request.model);
             if (nextModel && nextModel !== request.model) {
               console.error(`[NineRouterClient] Model '${request.model}' returned HTTP ${response.status}. Retrying with fallback '${nextModel}' (attempt ${retryCount + 1}/3)...`);
               await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retryCount)));
@@ -148,14 +148,8 @@ export class NineRouterClient {
 
         if (!response.ok) {
           const errorText = await response.text();
-          if (([404, 429, 500, 502, 503, 504].includes(response.status)) && retryCount < 3) {
-            let models: string[] = [];
-            try {
-              models = await this.listModels();
-            } catch {
-              models = ["ag/gemini-3-flash", "ag/gemini-3.1-pro-low", "ag/claude-sonnet-4-6"];
-            }
-            const nextModel = models.find(m => m !== request.model && !m.includes(request.model)) || models[0];
+          if (this.enableFallback && ([404, 429, 500, 502, 503, 504].includes(response.status)) && retryCount < 3) {
+            const nextModel = await this.getNextFallbackModel(request.model);
             if (nextModel && nextModel !== request.model) {
               console.error(`[NineRouterClient] Model '${request.model}' returned HTTP ${response.status}. Retrying with fallback '${nextModel}' (attempt ${retryCount + 1}/3)...`);
               await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retryCount)));
@@ -256,5 +250,21 @@ export class NineRouterClient {
     }
 
     return fullContent;
+  }
+
+  private async getNextFallbackModel(currentModel: string): Promise<string | null> {
+    if (!this.enableFallback) return null;
+    
+    if (this.fallbackModel && this.fallbackModel !== "FREE") {
+      return this.fallbackModel === currentModel ? null : this.fallbackModel;
+    }
+    
+    let models: string[] = [];
+    try {
+      models = await this.listModels();
+    } catch {
+      models = ["ag/gemini-3-flash", "ag/gemini-3.1-pro-low", "ag/claude-sonnet-4-6"];
+    }
+    return models.find(m => m !== currentModel && !m.includes(currentModel)) || models[0] || null;
   }
 }

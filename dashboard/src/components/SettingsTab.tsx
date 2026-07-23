@@ -69,9 +69,46 @@ export function SettingsTab() {
               className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-200 focus:border-emerald-500 focus:outline-none" 
             />
           </div>
+          <div>
+            <label className="block text-sm text-zinc-400 mb-1">Max Iterations (Loop Limit)</label>
+            <input 
+              type="number"
+              value={config.nineRouter.maxIterations ?? 15}
+              onChange={e => setConfig({...config, nineRouter: {...config.nineRouter, maxIterations: parseInt(e.target.value, 10)}})}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-200 focus:border-emerald-500 focus:outline-none" 
+            />
+          </div>
+          <div className="flex items-center gap-3 py-1">
+            <input 
+              type="checkbox"
+              id="enableFallback"
+              checked={config.nineRouter.enableFallback !== false}
+              onChange={e => setConfig({...config, nineRouter: {...config.nineRouter, enableFallback: e.target.checked}})}
+              className="w-4 h-4 text-emerald-500 bg-zinc-950 border-zinc-800 rounded focus:ring-emerald-500" 
+            />
+            <label htmlFor="enableFallback" className="text-sm text-zinc-300 cursor-pointer">Enable Model Fallback (404/429/5xx)</label>
+          </div>
+          {config.nineRouter.enableFallback !== false && (
+            <div>
+              <label className="block text-sm text-zinc-400 mb-1">Fallback Model ID (use 'FREE' for first available free model)</label>
+              <input 
+                type="text"
+                value={config.nineRouter.fallbackModel ?? 'FREE'}
+                onChange={e => setConfig({...config, nineRouter: {...config.nineRouter, fallbackModel: e.target.value}})}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-200 focus:border-emerald-500 focus:outline-none" 
+              />
+            </div>
+          )}
           <div className="flex flex-col gap-2 pt-2 border-t border-zinc-800">
             <button 
-              onClick={() => setConfig({...config, nineRouter: {...config.nineRouter, baseUrl: 'http://localhost:20128/v1', apiKey: 'free'}})}
+              onClick={() => setConfig({...config, nineRouter: {
+                ...config.nineRouter,
+                baseUrl: 'http://localhost:20128/v1',
+                apiKey: 'free',
+                enableFallback: true,
+                fallbackModel: 'FREE',
+                maxIterations: 15
+              }})}
               className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-600/50 px-4 py-2 rounded-md font-medium transition-colors w-full text-center"
             >
               Auto-Config 9Router (Local Daemon / Free)

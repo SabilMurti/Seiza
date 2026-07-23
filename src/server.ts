@@ -208,7 +208,14 @@ export async function startServer(config: ServerConfig) {
            task.prompt += injectedSkillsContext;
          });
       }
-      const runner = new DAGRunner(parsedTasks, agentsDir, args.model as string, args.cwd as string, bridgeManager);
+      const runner = new DAGRunner(
+        parsedTasks, 
+        agentsDir, 
+        args.model as string, 
+        args.cwd as string, 
+        bridgeManager,
+        configManager.getConfig().nineRouter
+      );
       activeTasks = runner.getTasks();
 
       let finalTasks: Task[];
@@ -242,11 +249,13 @@ export async function startServer(config: ServerConfig) {
       if (modelOverride) {
         profile.model = modelOverride;
       }
-      const cfg = configManager.getConfig();
-      const client = new NineRouterClient({ 
-        apiKey: cfg.nineRouter.apiKey,
-        baseUrl: cfg.nineRouter.baseUrl
-      });
+       const cfg = configManager.getConfig();
+       const client = new NineRouterClient({ 
+         apiKey: cfg.nineRouter.apiKey,
+         baseUrl: cfg.nineRouter.baseUrl,
+         enableFallback: cfg.nineRouter.enableFallback,
+         fallbackModel: cfg.nineRouter.fallbackModel
+       });
       // Inject skills if provided
       let injectedSkillsContext = "";
       if (Array.isArray(args.skills)) {
@@ -279,7 +288,7 @@ export async function startServer(config: ServerConfig) {
       }
       eventBroker.emit('task_started', { task: dummyTask });
 
-      const agent = new Agent(profile, client, bridgeManager, cwdOverride);
+       const agent = new Agent(profile, client, bridgeManager, cwdOverride, cfg.nineRouter.maxIterations);
       let result: string;
       try {
         result = await agent.run(prompt);
