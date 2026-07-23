@@ -141,14 +141,11 @@ export class DAGRunner {
   }
 
   private async executeTask(task: Task): Promise<void> {
-    console.log("[executeTask] started");
     const logger = getLogger();
-    console.log("[executeTask] logger retrieved");
 
     try {
       try {
         logger.logTaskStart(task.id, 'session_mock', task.prompt); // 'session_mock' needs to be replaced later with actual session id if passed to DAGRunner
-        console.log("[executeTask] logTaskStart finished");
       } catch (logErr) {
         console.warn("[executeTask] Warning: Failed to log task start to SQLite database:", logErr);
       }
@@ -162,13 +159,10 @@ export class DAGRunner {
         eventBroker.emit('task_updated', { ...task });
       }
 
-      console.log("[executeTask] profile path:", path.join(this.agentsDir, `${task.agent}.md`));
       const profilePath = path.join(this.agentsDir, `${task.agent}.md`);
       let profile: AgentProfile;
       if (fs.existsSync(profilePath)) {
-        console.log("[executeTask] loading profile...");
         profile = Agent.loadFromFile(profilePath);
-        console.log("[executeTask] profile loaded:", profile.name);
       } else {
         profile = { name: task.agent, model: "auto", tools: [], systemPrompt: `You are a ${task.agent} agent.` };
       }
@@ -177,13 +171,10 @@ export class DAGRunner {
       if (this.modelOverride) {
         profile.model = this.modelOverride;
       }
-      console.log("[executeTask] instantiating agent with model:", profile.model);
       const agent = new Agent(profile, client, this.bridgeManager, this.cwdOverride);
-      console.log("[executeTask] agent instantiated. Running agent...");
       
       // If the task is a coder task, we might want to run consensus
       let result = await agent.run(task.prompt);
-      console.log("[executeTask] agent.run completed. Result length:", result.length);
       
       if (task.agent === 'coder') {
         // Setup reviewer — only run consensus if a proper reviewer.md profile exists

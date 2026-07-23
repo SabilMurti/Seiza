@@ -1054,13 +1054,10 @@ var DAGRunner = class {
     return Array.from(this.tasks.values());
   }
   async executeTask(task) {
-    console.log("[executeTask] started");
     const logger = getLogger();
-    console.log("[executeTask] logger retrieved");
     try {
       try {
         logger.logTaskStart(task.id, "session_mock", task.prompt);
-        console.log("[executeTask] logTaskStart finished");
       } catch (logErr) {
         console.warn("[executeTask] Warning: Failed to log task start to SQLite database:", logErr);
       }
@@ -1072,13 +1069,10 @@ var DAGRunner = class {
         task.status = "running";
         eventBroker.emit("task_updated", { ...task });
       }
-      console.log("[executeTask] profile path:", path5.join(this.agentsDir, `${task.agent}.md`));
       const profilePath = path5.join(this.agentsDir, `${task.agent}.md`);
       let profile;
       if (fs6.existsSync(profilePath)) {
-        console.log("[executeTask] loading profile...");
         profile = Agent.loadFromFile(profilePath);
-        console.log("[executeTask] profile loaded:", profile.name);
       } else {
         profile = { name: task.agent, model: "auto", tools: [], systemPrompt: `You are a ${task.agent} agent.` };
       }
@@ -1086,11 +1080,8 @@ var DAGRunner = class {
       if (this.modelOverride) {
         profile.model = this.modelOverride;
       }
-      console.log("[executeTask] instantiating agent with model:", profile.model);
       const agent = new Agent(profile, client, this.bridgeManager, this.cwdOverride);
-      console.log("[executeTask] agent instantiated. Running agent...");
       let result = await agent.run(task.prompt);
-      console.log("[executeTask] agent.run completed. Result length:", result.length);
       if (task.agent === "coder") {
         const reviewerProfilePath = path5.join(this.agentsDir, `reviewer.md`);
         if (fs6.existsSync(reviewerProfilePath)) {
