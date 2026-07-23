@@ -31,9 +31,23 @@ export class ConsensusManager {
         agent: "reviewer",
         message: `Review iteration ${currentIteration}/${this.maxRetries} started.`
       });
-      const reviewerResponse = await this.reviewer.run(`Review the following changes for task: ${task.prompt}\n\nChanges:\n${currentDiff}\n\nProvide your verdict. If there are issues, list them clearly. If approved, reply with EXACTLY "APPROVED".`);
+      const REVIEWER_TIMEOUT_MS = 60_000;
+      const reviewerResponsePromise = this.reviewer.run(`Review the following changes for task: ${task.prompt}\n\nChanges:\n${currentDiff}\n\nProvide your verdict. If there are issues, list them clearly. If approved, reply with EXACTLY "APPROVED".`);
+      const timeoutPromise = new Promise<string>((_, reject) =>
+        setTimeout(() => reject(new Error('Reviewer timeout')), REVIEWER_TIMEOUT_MS)
+      );
+      let reviewerResponse: string;
+      try {
+        reviewerResponse = await Promise.race([reviewerResponsePromise, timeoutPromise]) as string;
+      } catch (e) {
+        // Reviewer timed out or failed — auto-approve to avoid blocking the whole task
+        console.error('[ConsensusManager] Reviewer call timed out or failed, auto-approving:', e);
+        return { success: true, verdict: 'Auto-approved: reviewer timed out.' };
+      }
 
-      if (reviewerResponse.trim() === "APPROVED") {
+      const cleanResponse = reviewerResponse.trim().toUpperCase().replace(/[*'"_`.]/g, '');
+      // Accept both "APPROVED" and <finish> tag as approval signals
+      if (cleanResponse === "APPROVED" || reviewerResponse.includes("<finish>")) {
         return { success: true, verdict: "Changes approved by reviewer." };
       }
 

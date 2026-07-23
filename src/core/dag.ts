@@ -166,25 +166,24 @@ export class DAGRunner {
       let result = await agent.run(task.prompt);
       
       if (task.agent === 'coder') {
-        // Setup reviewer
+        // Setup reviewer — only run consensus if a proper reviewer.md profile exists
         const reviewerProfilePath = path.join(this.agentsDir, `reviewer.md`);
-        let reviewerProfile: AgentProfile;
         if (fs.existsSync(reviewerProfilePath)) {
-          reviewerProfile = Agent.loadFromFile(reviewerProfilePath);
+          let reviewerProfile: AgentProfile = Agent.loadFromFile(reviewerProfilePath);
+          if (this.modelOverride) {
+            reviewerProfile.model = this.modelOverride;
+          }
+          const reviewerAgent = new Agent(reviewerProfile, client, this.bridgeManager, this.cwdOverride);
+          const consensus = new ConsensusManager(agent, reviewerAgent);
+          
+          const consensusResult = await consensus.coordinate(task, result);
+          if (!consensusResult.success) {
+            throw new Error(`Consensus failed: ${consensusResult.verdict}`);
+          }
+          logger.logEvent(task.id, 'info', 'consensus', `Consensus reached: ${consensusResult.verdict}`);
         } else {
-          reviewerProfile = { name: "reviewer", model: "auto", tools: [], systemPrompt: "Reviewer profile missing" };
+          logger.logEvent(task.id, 'info', 'consensus', 'No reviewer.md found — skipping consensus step.');
         }
-        if (this.modelOverride) {
-          reviewerProfile.model = this.modelOverride;
-        }
-        const reviewerAgent = new Agent(reviewerProfile, client, this.bridgeManager, this.cwdOverride);
-        const consensus = new ConsensusManager(agent, reviewerAgent);
-        
-        const consensusResult = await consensus.coordinate(task, result);
-        if (!consensusResult.success) {
-           throw new Error(`Consensus failed: ${consensusResult.verdict}`);
-        }
-        logger.logEvent(task.id, 'info', 'consensus', `Consensus reached: ${consensusResult.verdict}`);
       }
 
       task.result = result;

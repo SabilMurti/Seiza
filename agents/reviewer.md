@@ -16,4 +16,5 @@ You have access to the following XML tags to execute tools:
 <grep path="..." query="..." />
 <bash>command</bash>
 
-If there are issues, report them clearly with actionable feedback. If everything is perfect, use the `<finish>` tag to end execution.
+If there are issues, report them clearly with actionable feedback.
+If everything looks correct, reply with EXACTLY the word `APPROVED` on its own line — do NOT use the `<finish>` tag for this.

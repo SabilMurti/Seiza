@@ -36,11 +36,14 @@ export function TasksTab() {
     fetchTasks();
   }, []);
 
-  const filteredTasks = tasks.filter(t => 
-    t.prompt.toLowerCase().includes(search.toLowerCase()) ||
-    t.id.toLowerCase().includes(search.toLowerCase()) ||
-    (t.cwd && t.cwd.toLowerCase().includes(search.toLowerCase()))
-  );
+  const filteredTasks = tasks.filter(t => {
+    const s = search.toLowerCase();
+    return (
+      (t.prompt && t.prompt.toLowerCase().includes(s)) ||
+      (t.id && t.id.toLowerCase().includes(s)) ||
+      (t.cwd && t.cwd.toLowerCase().includes(s))
+    );
+  });
 
   return (
     <div className="h-full flex flex-col gap-6">

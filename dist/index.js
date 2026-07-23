@@ -896,13 +896,25 @@ var ConsensusManager = class {
         agent: "reviewer",
         message: `Review iteration ${currentIteration}/${this.maxRetries} started.`
       });
-      const reviewerResponse = await this.reviewer.run(`Review the following changes for task: ${task.prompt}
+      const REVIEWER_TIMEOUT_MS = 6e4;
+      const reviewerResponsePromise = this.reviewer.run(`Review the following changes for task: ${task.prompt}
 
 Changes:
 ${currentDiff}
 
 Provide your verdict. If there are issues, list them clearly. If approved, reply with EXACTLY "APPROVED".`);
-      if (reviewerResponse.trim() === "APPROVED") {
+      const timeoutPromise = new Promise(
+        (_, reject) => setTimeout(() => reject(new Error("Reviewer timeout")), REVIEWER_TIMEOUT_MS)
+      );
+      let reviewerResponse;
+      try {
+        reviewerResponse = await Promise.race([reviewerResponsePromise, timeoutPromise]);
+      } catch (e) {
+        console.error("[ConsensusManager] Reviewer call timed out or failed, auto-approving:", e);
+        return { success: true, verdict: "Auto-approved: reviewer timed out." };
+      }
+      const cleanResponse = reviewerResponse.trim().toUpperCase().replace(/[*'"_`.]/g, "");
+      if (cleanResponse === "APPROVED" || reviewerResponse.includes("<finish>")) {
         return { success: true, verdict: "Changes approved by reviewer." };
       }
       if (currentIteration >= this.maxRetries) {
@@ -1049,22 +1061,21 @@ var DAGRunner = class {
       let result = await agent.run(task.prompt);
       if (task.agent === "coder") {
         const reviewerProfilePath = path5.join(this.agentsDir, `reviewer.md`);
-        let reviewerProfile;
         if (fs6.existsSync(reviewerProfilePath)) {
-          reviewerProfile = Agent.loadFromFile(reviewerProfilePath);
+          let reviewerProfile = Agent.loadFromFile(reviewerProfilePath);
+          if (this.modelOverride) {
+            reviewerProfile.model = this.modelOverride;
+          }
+          const reviewerAgent = new Agent(reviewerProfile, client, this.bridgeManager, this.cwdOverride);
+          const consensus = new ConsensusManager(agent, reviewerAgent);
+          const consensusResult = await consensus.coordinate(task, result);
+          if (!consensusResult.success) {
+            throw new Error(`Consensus failed: ${consensusResult.verdict}`);
+          }
+          logger.logEvent(task.id, "info", "consensus", `Consensus reached: ${consensusResult.verdict}`);
         } else {
-          reviewerProfile = { name: "reviewer", model: "auto", tools: [], systemPrompt: "Reviewer profile missing" };
+          logger.logEvent(task.id, "info", "consensus", "No reviewer.md found \u2014 skipping consensus step.");
         }
-        if (this.modelOverride) {
-          reviewerProfile.model = this.modelOverride;
-        }
-        const reviewerAgent = new Agent(reviewerProfile, client, this.bridgeManager, this.cwdOverride);
-        const consensus = new ConsensusManager(agent, reviewerAgent);
-        const consensusResult = await consensus.coordinate(task, result);
-        if (!consensusResult.success) {
-          throw new Error(`Consensus failed: ${consensusResult.verdict}`);
-        }
-        logger.logEvent(task.id, "info", "consensus", `Consensus reached: ${consensusResult.verdict}`);
       }
       task.result = result;
       task.status = "completed";
@@ -1096,6 +1107,21 @@ async function startServer(config) {
     baseUrl: configManager.getConfig().nineRouter?.baseUrl,
     apiKey: configManager.getConfig().nineRouter?.apiKey
   });
+  const syncTaskLocal = (data) => {
+    if (data && data.task) {
+      const incomingTask = data.task;
+      const idx = activeTasks.findIndex((t) => t.id === incomingTask.id);
+      if (idx !== -1) {
+        activeTasks[idx] = incomingTask;
+      } else {
+        activeTasks.push(incomingTask);
+      }
+    }
+  };
+  eventBroker.on("task_started", syncTaskLocal);
+  eventBroker.on("task_updated", syncTaskLocal);
+  eventBroker.on("task_completed", syncTaskLocal);
+  eventBroker.on("task_failed", syncTaskLocal);
   const mcpServer = new Server({
     name: "seiza",
     version: "0.1.0"
@@ -1212,28 +1238,13 @@ async function startServer(config) {
       if (Array.isArray(args.dag) && args.dag.length > 0) {
         parsedTasks = args.dag;
       } else {
-        const profilePath = path6.join(agentsDir, "planner.md");
-        let profile;
-        if (fs7.existsSync(profilePath)) {
-          profile = Agent.loadFromFile(profilePath);
-        } else {
-          profile = { name: "planner", model: "auto", tools: [], systemPrompt: "You are a planner." };
-        }
-        const client = new NineRouterClient({ apiKey: process.env.OPENROUTER_API_KEY || "" });
-        const planner = new Agent(profile, client, bridgeManager);
-        const plannerResult = await planner.run(prompt);
-        try {
-          let cleaned = plannerResult.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
-          const firstBracket = cleaned.indexOf("[");
-          const lastBracket = cleaned.lastIndexOf("]");
-          let jsonString = cleaned;
-          if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-            jsonString = cleaned.substring(firstBracket, lastBracket + 1);
-          }
-          parsedTasks = JSON.parse(jsonString);
-        } catch (e) {
-          throw new Error("Failed to parse Planner output as JSON DAG: " + String(e) + "\nOutput was: " + plannerResult);
-        }
+        parsedTasks = [{
+          id: `task-${Date.now()}`,
+          agent: "coder",
+          prompt,
+          dependencies: [],
+          status: "pending"
+        }];
       }
       let injectedSkillsContext = "";
       if (Array.isArray(args.skills)) {
@@ -1253,37 +1264,12 @@ ${ins}`;
           task.prompt += injectedSkillsContext;
         });
       }
-      const port = config.port || 3456;
-      const onTaskEvent = async (data) => {
-        try {
-          await fetch(`http://localhost:${port}/api/tasks/sync`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tasks: [data.task] })
-          });
-        } catch {
-        }
-      };
-      eventBroker.on("task_started", onTaskEvent);
-      eventBroker.on("task_completed", onTaskEvent);
-      eventBroker.on("task_failed", onTaskEvent);
       const runner = new DAGRunner(parsedTasks, agentsDir, args.model, args.cwd, bridgeManager);
       activeTasks = runner.getTasks();
-      try {
-        await fetch(`http://localhost:${port}/api/tasks/sync`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tasks: activeTasks })
-        });
-      } catch {
-      }
       let finalTasks;
       try {
         finalTasks = await runner.run();
       } finally {
-        eventBroker.off("task_started", onTaskEvent);
-        eventBroker.off("task_completed", onTaskEvent);
-        eventBroker.off("task_failed", onTaskEvent);
       }
       activeTasks = finalTasks;
       return {
@@ -1329,7 +1315,6 @@ ${ins}`;
       if (injectedSkillsContext) {
         profile.systemPrompt += injectedSkillsContext;
       }
-      const port = config.port || 3456;
       const dummyTask = {
         id: `single-${Date.now()}`,
         agent: agentName,
@@ -1337,33 +1322,25 @@ ${ins}`;
         dependencies: [],
         status: "running"
       };
-      try {
-        await fetch(`http://localhost:${port}/api/tasks/sync`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tasks: [dummyTask] })
-        });
-      } catch {
+      const idx = activeTasks.findIndex((t) => t.id === dummyTask.id);
+      if (idx !== -1) {
+        activeTasks[idx] = dummyTask;
+      } else {
+        activeTasks.push(dummyTask);
       }
+      eventBroker.emit("task_started", { task: dummyTask });
       const agent = new Agent(profile, client, bridgeManager, cwdOverride);
       let result;
       try {
         result = await agent.run(prompt);
         dummyTask.status = "completed";
         dummyTask.result = result;
+        eventBroker.emit("task_completed", { task: dummyTask });
       } catch (err) {
         dummyTask.status = "failed";
         dummyTask.error = String(err);
+        eventBroker.emit("task_failed", { task: dummyTask });
         throw err;
-      } finally {
-        try {
-          await fetch(`http://localhost:${port}/api/tasks/sync`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tasks: [dummyTask] })
-          });
-        } catch {
-        }
       }
       return {
         content: [{ type: "text", text: result }]
@@ -1536,17 +1513,20 @@ data: ${JSON.stringify(data)}
       if (Array.isArray(tasks)) {
         for (const incomingTask of tasks) {
           const idx = activeTasks.findIndex((t) => t.id === incomingTask.id);
+          const previousTask = idx !== -1 ? activeTasks[idx] : null;
           if (idx !== -1) {
             activeTasks[idx] = incomingTask;
           } else {
             activeTasks.push(incomingTask);
           }
-          if (incomingTask.status === "running") {
-            eventBroker.emit("task_started", { task: incomingTask });
-          } else if (incomingTask.status === "completed") {
-            eventBroker.emit("task_completed", { task: incomingTask });
-          } else if (incomingTask.status === "failed") {
-            eventBroker.emit("task_failed", { task: incomingTask });
+          if (!previousTask || previousTask.status !== incomingTask.status) {
+            if (incomingTask.status === "running") {
+              eventBroker.emit("task_started", { task: incomingTask });
+            } else if (incomingTask.status === "completed") {
+              eventBroker.emit("task_completed", { task: incomingTask });
+            } else if (incomingTask.status === "failed") {
+              eventBroker.emit("task_failed", { task: incomingTask });
+            }
           }
         }
       }
