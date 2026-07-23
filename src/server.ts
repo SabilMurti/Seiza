@@ -39,6 +39,24 @@ export async function startServer(config: ServerConfig) {
     baseUrl: configManager.getConfig().nineRouter?.baseUrl,
     apiKey: configManager.getConfig().nineRouter?.apiKey
   });
+
+  // Local task synchronization via eventBroker
+  const syncTaskLocal = (data: any) => {
+    if (data && data.task) {
+      const incomingTask = data.task;
+      const idx = activeTasks.findIndex(t => t.id === incomingTask.id);
+      if (idx !== -1) {
+        activeTasks[idx] = incomingTask;
+      } else {
+        activeTasks.push(incomingTask);
+      }
+    }
+  };
+  eventBroker.on('task_started', syncTaskLocal);
+  eventBroker.on('task_updated', syncTaskLocal);
+  eventBroker.on('task_completed', syncTaskLocal);
+  eventBroker.on('task_failed', syncTaskLocal);
+
   const mcpServer = new Server({
     name: "seiza",
     version: "0.1.0"
@@ -160,29 +178,15 @@ export async function startServer(config: ServerConfig) {
       if (Array.isArray(args.dag) && args.dag.length > 0) {
         parsedTasks = args.dag as Task[];
       } else {
-        const profilePath = path.join(agentsDir, "planner.md");
-        let profile: AgentProfile;
-        if (fs.existsSync(profilePath)) {
-           profile = Agent.loadFromFile(profilePath);
-        } else {
-           profile = { name: "planner", model: "auto", tools: [], systemPrompt: "You are a planner." };
-        }
-        
-        const client = new NineRouterClient({ apiKey: process.env.OPENROUTER_API_KEY || '' });
-        const planner = new Agent(profile, client, bridgeManager);
-        const plannerResult = await planner.run(prompt);
-        try {
-            let cleaned = plannerResult.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
-            const firstBracket = cleaned.indexOf('[');
-            const lastBracket = cleaned.lastIndexOf(']');
-            let jsonString = cleaned;
-            if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-              jsonString = cleaned.substring(firstBracket, lastBracket + 1);
-            }
-            parsedTasks = JSON.parse(jsonString) as Task[];
-        } catch (e) {
-            throw new Error("Failed to parse Planner output as JSON DAG: " + String(e) + "\nOutput was: " + plannerResult);
-        }
+        // No pre-planned DAG provided — the caller (e.g. Antigravity IDE) is the planner.
+        // Create a single coder task directly with the full prompt.
+        parsedTasks = [{
+          id: `task-${Date.now()}`,
+          agent: 'coder',
+          prompt: prompt,
+          dependencies: [],
+          status: 'pending'
+        }];
       }
       
       // If skills are requested, pull them and append to planner's system prompt or global context
@@ -202,40 +206,14 @@ export async function startServer(config: ServerConfig) {
            task.prompt += injectedSkillsContext;
          });
       }
-      const port = config.port || 3456;
-      const onTaskEvent = async (data: any) => {
-        try {
-          await fetch(`http://localhost:${port}/api/tasks/sync`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tasks: [data.task] })
-          });
-        } catch {}
-      };
-
-      eventBroker.on('task_started', onTaskEvent);
-      eventBroker.on('task_completed', onTaskEvent);
-      eventBroker.on('task_failed', onTaskEvent);
-
       const runner = new DAGRunner(parsedTasks, agentsDir, args.model as string, args.cwd as string, bridgeManager);
       activeTasks = runner.getTasks();
-      
-      // Sync initial state of all tasks
-      try {
-        await fetch(`http://localhost:${port}/api/tasks/sync`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tasks: activeTasks })
-        });
-      } catch {}
 
       let finalTasks: Task[];
       try {
         finalTasks = await runner.run();
       } finally {
-        eventBroker.off('task_started', onTaskEvent);
-        eventBroker.off('task_completed', onTaskEvent);
-        eventBroker.off('task_failed', onTaskEvent);
+        // Handlers are registered globally, no need to unregister here
       }
       activeTasks = finalTasks;
 
@@ -282,7 +260,6 @@ export async function startServer(config: ServerConfig) {
          profile.systemPrompt += injectedSkillsContext;
       }
 
-      const port = config.port || 3456;
       const dummyTask: Task = {
         id: `single-${Date.now()}`,
         agent: agentName as any,
@@ -291,13 +268,14 @@ export async function startServer(config: ServerConfig) {
         status: 'running'
       };
 
-      try {
-        await fetch(`http://localhost:${port}/api/tasks/sync`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tasks: [dummyTask] })
-        });
-      } catch {}
+      // Set initially
+      const idx = activeTasks.findIndex(t => t.id === dummyTask.id);
+      if (idx !== -1) {
+        activeTasks[idx] = dummyTask;
+      } else {
+        activeTasks.push(dummyTask);
+      }
+      eventBroker.emit('task_started', { task: dummyTask });
 
       const agent = new Agent(profile, client, bridgeManager, cwdOverride);
       let result: string;
@@ -305,18 +283,12 @@ export async function startServer(config: ServerConfig) {
         result = await agent.run(prompt);
         dummyTask.status = 'completed';
         dummyTask.result = result;
+        eventBroker.emit('task_completed', { task: dummyTask });
       } catch (err) {
         dummyTask.status = 'failed';
         dummyTask.error = String(err);
+        eventBroker.emit('task_failed', { task: dummyTask });
         throw err;
-      } finally {
-        try {
-          await fetch(`http://localhost:${port}/api/tasks/sync`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tasks: [dummyTask] })
-          });
-        } catch {}
       }
 
       return {
@@ -505,17 +477,21 @@ export async function startServer(config: ServerConfig) {
       if (Array.isArray(tasks)) {
         for (const incomingTask of tasks) {
           const idx = activeTasks.findIndex(t => t.id === incomingTask.id);
+          const previousTask = idx !== -1 ? activeTasks[idx] : null;
           if (idx !== -1) {
             activeTasks[idx] = incomingTask;
           } else {
             activeTasks.push(incomingTask);
           }
-          if (incomingTask.status === 'running') {
-            eventBroker.emit('task_started', { task: incomingTask });
-          } else if (incomingTask.status === 'completed') {
-            eventBroker.emit('task_completed', { task: incomingTask });
-          } else if (incomingTask.status === 'failed') {
-            eventBroker.emit('task_failed', { task: incomingTask });
+          
+          if (!previousTask || previousTask.status !== incomingTask.status) {
+            if (incomingTask.status === 'running') {
+              eventBroker.emit('task_started', { task: incomingTask });
+            } else if (incomingTask.status === 'completed') {
+              eventBroker.emit('task_completed', { task: incomingTask });
+            } else if (incomingTask.status === 'failed') {
+              eventBroker.emit('task_failed', { task: incomingTask });
+            }
           }
         }
       }
